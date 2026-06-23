@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Виртуальное окружение
+.venv/
+venv/
+env/
+ENV/
+
+# Секреты — НИКОГДА не должны попасть в git
+.env
+.env.*
+*.env
+!.env.example
+
+# Логи
+*.log
+logs/
+
+# Кеш и временные файлы
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.zip
+*.sqlite
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.override.yml
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Alembic local override
+alembic/versions/*.pyc
