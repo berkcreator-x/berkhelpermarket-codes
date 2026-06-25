@@ -36,7 +36,7 @@ class DBSessionMiddleware(BaseMiddleware):
                     error=str(exc),
                     error_type=type(exc).__name__,
                 )
-                raise
+                return None
             else:
                 await session.commit()
                 return result
