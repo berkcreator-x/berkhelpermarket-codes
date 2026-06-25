@@ -16,9 +16,12 @@ def main_menu_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
-def cancel_keyboard() -> ReplyKeyboardMarkup:
+def cancel_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        keyboard=[
+            [KeyboardButton(text="❌ Отмена")],
+            [KeyboardButton(text="🏠 Главное меню")],
+        ],
         resize_keyboard=True,
     )
 
