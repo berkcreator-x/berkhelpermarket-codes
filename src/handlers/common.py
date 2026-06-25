@@ -52,6 +52,7 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 
 @router.message(Command("menu"))
+@router.message(F.text == "🏠 Главное меню")
 async def cmd_menu(message: Message, state: FSMContext) -> None:
     await state.clear()
     is_admin = message.from_user is not None and message.from_user.id == settings.admin_id
