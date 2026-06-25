@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message, TelegramObject, Update
+from aiogram.types import TelegramObject, Update
 
 from src.database import AsyncSessionLocal
 from src.utils import get_logger
@@ -13,12 +13,6 @@ logger = get_logger(__name__)
 
 
 class DBSessionMiddleware(BaseMiddleware):
-    """Создаёт SQLAlchemy AsyncSession для каждого обновления.
-
-    Коммитит при успехе, откатывает и логирует при ошибке.
-    Состояние не хранится между обновлениями (stateless).
-    """
-
     async def __call__(
         self,
         handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
@@ -36,7 +30,7 @@ class DBSessionMiddleware(BaseMiddleware):
                     error=str(exc),
                     error_type=type(exc).__name__,
                 )
-               if isinstance(event, Update) and event.message is not None:
+                if isinstance(event, Update) and event.message is not None:
                     await event.message.answer("❌ Ошибка: " + str(exc), parse_mode=None)
                 return None
             else:
