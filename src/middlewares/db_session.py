@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject
+from aiogram.types import Message, TelegramObject, Update
 
 from src.database import AsyncSessionLocal
 from src.utils import get_logger
@@ -36,6 +36,8 @@ class DBSessionMiddleware(BaseMiddleware):
                     error=str(exc),
                     error_type=type(exc).__name__,
                 )
+                if isinstance(event, Update) and event.message is not None:
+                    await event.message.answer("❌ Ошибка: " + str(exc))
                 return None
             else:
                 await session.commit()
