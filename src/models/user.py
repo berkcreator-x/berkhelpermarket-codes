@@ -24,8 +24,14 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     plan: Mapped[PlanType] = mapped_column(
-        Enum(PlanType, name="plan_type"), default=PlanType.FREE, nullable=False
-    )
+    Enum(
+        PlanType,
+        name="plan_type",
+        values_callable=lambda x: [e.value for e in x],
+    ),
+    default=PlanType.FREE,
+    nullable=False,
+)
     generation_balance: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     generation_logs: Mapped[list["GenerationLog"]] = relationship(
