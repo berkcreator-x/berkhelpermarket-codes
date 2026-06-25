@@ -36,8 +36,8 @@ class DBSessionMiddleware(BaseMiddleware):
                     error=str(exc),
                     error_type=type(exc).__name__,
                 )
-                if isinstance(event, Update) and event.message is not None:
-                    await event.message.answer("❌ Ошибка: " + str(exc))
+               if isinstance(event, Update) and event.message is not None:
+                    await event.message.answer("❌ Ошибка: " + str(exc), parse_mode=None)
                 return None
             else:
                 await session.commit()
