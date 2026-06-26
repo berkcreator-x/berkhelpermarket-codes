@@ -17,10 +17,15 @@ router = Router(name="common")
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession, state: FSMContext) -> None:
+async def cmd_start(
+    message: Message,
+    session: AsyncSession,
+    state: FSMContext,
+) -> None:
     await state.clear()
 
     user_repo = UserRepository(session)
+
     await user_repo.get_or_create(
         telegram_id=message.from_user.id,
         username=message.from_user.username if message.from_user else None,
@@ -31,38 +36,72 @@ async def cmd_start(message: Message, session: AsyncSession, state: FSMContext) 
         and message.from_user.id == settings.admin_id
     )
 
-    await message.answer(
-        "🚀 Добро пожаловать в BCC\n\n"
-        "ИИ-помощник для продавцов Wildberries и Ozon.\n\n"
-        "📈 Создавайте продающие карточки товаров за 30 секунд.\n\n"
-        "Что умеет BCC:\n"
-        "• Генерация карточек товаров\n"
-        "• Улучшение существующих описаний\n"
-        "• Анализ целевой аудитории\n"
-        "• Создание продающих текстов\n\n"
+    text = (
+        "🚀 Добро пожаловать в BerkHelperMarket\n\n"
+        "Ваш ИИ-помощник для создания продающих карточек товаров.\n\n"
+        "📈 Что умеет бот:\n"
+        "• Генерирует карточки для Wildberries\n"
+        "• Создает описания для Ozon\n"
+        "• Улучшает существующие карточки\n"
+        "• Помогает увеличить продажи\n\n"
         "🎁 Вам доступна бесплатная генерация.\n\n"
-        "👇 Выберите действие:",
-        reply_markup=main_menu_keyboard(is_admin=is_admin),
+        "⚡ В среднем создание карточки занимает 10–30 секунд.\n\n"
+        "👇 Выберите нужный раздел:"
+    )
+
+    await message.answer(
+        text,
+        reply_markup=main_menu_keyboard(
+            is_admin=is_admin,
+        ),
     )
 
 
 @router.message(Command("cancel"))
 @router.message(F.text == "❌ Отмена")
-async def cmd_cancel(message: Message, state: FSMContext) -> None:
+async def cmd_cancel(
+    message: Message,
+    state: FSMContext,
+) -> None:
     current_state = await state.get_state()
+
     if current_state is None:
-        await message.answer("Нет активного действия для отмены.")
+        await message.answer(
+            "ℹ️ Сейчас нет активного действия."
+        )
         return
 
     await state.clear()
 
-    is_admin = message.from_user is not None and message.from_user.id == settings.admin_id
-    await message.answer("Действие отменено.", reply_markup=main_menu_keyboard(is_admin=is_admin))
+    is_admin = (
+        message.from_user is not None
+        and message.from_user.id == settings.admin_id
+    )
+
+    await message.answer(
+        "✅ Действие отменено.",
+        reply_markup=main_menu_keyboard(
+            is_admin=is_admin,
+        ),
+    )
 
 
 @router.message(Command("menu"))
 @router.message(F.text == "🏠 Главное меню")
-async def cmd_menu(message: Message, state: FSMContext) -> None:
+async def cmd_menu(
+    message: Message,
+    state: FSMContext,
+) -> None:
     await state.clear()
-    is_admin = message.from_user is not None and message.from_user.id == settings.admin_id
-    await message.answer("Главное меню:", reply_markup=main_menu_keyboard(is_admin=is_admin))
+
+    is_admin = (
+        message.from_user is not None
+        and message.from_user.id == settings.admin_id
+    )
+
+    await message.answer(
+        "🏠 Главное меню",
+        reply_markup=main_menu_keyboard(
+            is_admin=is_admin,
+        ),
+    )
