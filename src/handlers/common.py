@@ -29,10 +29,15 @@ async def cmd_start(message: Message, session: AsyncSession, state: FSMContext) 
     is_admin = message.from_user is not None and message.from_user.id == settings.admin_id
 
     await message.answer(
-        "👋 Привет! Я <b>BerkHelperMarket</b> — помогаю создавать и улучшать "
-        "продающие карточки товаров для Wildberries, Ozon и Shopify.\n\n"
-        f"🎁 На вашем балансе: <b>{user.generation_balance}</b> генерация(-й).\n\n"
-        "Выберите действие в меню ниже 👇",
+        "⚡ Добро пожаловать в BCC\n\n"
+    "Создавайте продающие карточки товаров для Wildberries и Ozon с помощью ИИ.\n\n"
+    "🔥 Что умеет BCC:\n"
+    "• Генерация карточек товаров\n"
+    "• Улучшение существующих карточек\n"
+    "• Помощь с описаниями\n"
+    "• Быстрая обработка запросов\n\n"
+    "🎁 Новым пользователям доступна бесплатная генерация.\n\n"
+    "👇 Выберите действие:"
         reply_markup=main_menu_keyboard(is_admin=is_admin),
     )
 
