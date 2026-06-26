@@ -21,23 +21,27 @@ async def cmd_start(message: Message, session: AsyncSession, state: FSMContext) 
     await state.clear()
 
     user_repo = UserRepository(session)
-    user = await user_repo.get_or_create(
-        telegram_id=message.from_user.id,  # type: ignore[union-attr]
+    await user_repo.get_or_create(
+        telegram_id=message.from_user.id,
         username=message.from_user.username if message.from_user else None,
     )
 
-    is_admin = message.from_user is not None and message.from_user.id == settings.admin_id
+    is_admin = (
+        message.from_user is not None
+        and message.from_user.id == settings.admin_id
+    )
 
     await message.answer(
-        "⚡ Добро пожаловать в BCC\n\n"
-    "Создавайте продающие карточки товаров для Wildberries и Ozon с помощью ИИ.\n\n"
-    "🔥 Что умеет BCC:\n"
-    "• Генерация карточек товаров\n"
-    "• Улучшение существующих карточек\n"
-    "• Помощь с описаниями\n"
-    "• Быстрая обработка запросов\n\n"
-    "🎁 Новым пользователям доступна бесплатная генерация.\n\n"
-    "👇 Выберите действие:"
+        "🚀 Добро пожаловать в BCC\n\n"
+        "ИИ-помощник для продавцов Wildberries и Ozon.\n\n"
+        "📈 Создавайте продающие карточки товаров за 30 секунд.\n\n"
+        "Что умеет BCC:\n"
+        "• Генерация карточек товаров\n"
+        "• Улучшение существующих описаний\n"
+        "• Анализ целевой аудитории\n"
+        "• Создание продающих текстов\n\n"
+        "🎁 Вам доступна бесплатная генерация.\n\n"
+        "👇 Выберите действие:",
         reply_markup=main_menu_keyboard(is_admin=is_admin),
     )
 
