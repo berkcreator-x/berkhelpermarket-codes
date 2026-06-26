@@ -35,7 +35,7 @@ async def start_new_product(message: Message, state: FSMContext, session: AsyncS
     await state.set_state(NewProductStates.waiting_for_name)
     await message.answer(
         "🆕 <b>Создание новой карточки товара</b>\n\n"
-        "Шаг 1/4. Введите <b>название товара</b>:",
+        "📦 Шаг 1 из 4\n\nКак называется ваш товар?",
         reply_markup=cancel_keyboard(),
     )
 
@@ -74,7 +74,7 @@ async def process_features(message: Message, state: FSMContext) -> None:
     await state.update_data(features=message.text.strip())
     await state.set_state(NewProductStates.waiting_for_audience)
     await message.answer(
-        "Шаг 4/4. Укажите <b>целевую аудиторию</b>\n"
+        "🎯 Шаг 4 из 4\n\nДля кого предназначен товар?\n\nНапример:\n• женщины 25–45 лет\n• автомобилисты\n• владельцы кошек"
         "<i>Кому подойдёт этот товар?</i>"
     )
 
@@ -96,7 +96,10 @@ async def process_audience(message: Message, state: FSMContext, session: AsyncSe
 
     is_admin = message.from_user is not None and message.from_user.id == settings.admin_id
 
-    await message.answer("⏳ Генерирую карточку товара, это займёт 10–30 секунд…")
+    await message.answer("🧠 Анализирую товар...\n"
+                         "📊 Изучаю целевую аудиторию...\n"
+                         "✍️ Формирую продающий текст...\n\n"
+                         "Это займет 10–30 секунд.")
 
     generation_service = GenerationService(user_repo)
     try:
@@ -115,7 +118,7 @@ async def process_audience(message: Message, state: FSMContext, session: AsyncSe
         return
     except GenerationServiceError:
         await message.answer(
-            "❌ Сервис временно недоступен. Попробуйте позже.",
+            "⚠️ Генерация временно недоступна.\n\nНаш ИИ сейчас перегружен.\nПопробуйте повторить запрос немного позже.",
             reply_markup=main_menu_keyboard(is_admin=is_admin),
         )
         return
