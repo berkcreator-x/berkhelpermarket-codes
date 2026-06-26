@@ -18,7 +18,14 @@ class GenerationLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    type: Mapped[GenerationType] = mapped_column(Enum(GenerationType, name="generation_type"), nullable=False)
+   type: Mapped[GenerationType] = mapped_column(
+    Enum(
+        GenerationType,
+        name="generation_type",
+        values_callable=lambda x: [e.value for e in x],
+    ),
+    nullable=False,
+)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
