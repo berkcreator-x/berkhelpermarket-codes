@@ -43,5 +43,5 @@ class GenerationLog(Base):
     )
 
     user: Mapped["User"] = relationship(
-        back_populates="generation_logs"
+        back_populates="generation_logs",
     )
