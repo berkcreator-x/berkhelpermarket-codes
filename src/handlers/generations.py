@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 router = Router(name="generations")
 
 
-@router.message(F.text == "💳 Генерации")
+@router.message(F.text == "💎 Генерации")
 async def show_packages(message: Message, session: AsyncSession) -> None:
     user_repo = UserRepository(session)
     user = await user_repo.get_or_create(
