@@ -41,7 +41,7 @@ async def show_packages(
     )
 
     text = (
-        "⚡ <b>Магазин генераций BCC</b>\n\n"
+        "⚡ <b>Магазин генераций BerkHelperMarket</b>\n\n"
 
         f"💎 Ваш баланс: <b>{user.generation_balance}</b>\n\n"
 
