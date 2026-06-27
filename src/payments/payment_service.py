@@ -24,9 +24,24 @@ class GenerationPackage:
 
 
 GENERATION_PACKAGES: list[GenerationPackage] = [
-    GenerationPackage(id="pack_10",  title="10 генераций",  generations=10,  price_rub=99.0),
-    GenerationPackage(id="pack_50",  title="50 генераций",  generations=50,  price_rub=399.0),
-    GenerationPackage(id="pack_150", title="150 генераций", generations=150, price_rub=999.0),
+    GenerationPackage(
+        id="pack_10",
+        title="🔥 Старт",
+        generations=10,
+        price_rub=99.0,
+    ),
+    GenerationPackage(
+        id="pack_50",
+        title="⭐ Бизнес",
+        generations=50,
+        price_rub=399.0,
+    ),
+    GenerationPackage(
+        id="pack_150",
+        title="🚀 PRO",
+        generations=150,
+        price_rub=999.0,
+    ),
 ]
 
 
