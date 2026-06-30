@@ -25,7 +25,6 @@ class Settings(BaseSettings):
 
     # ── YooMoney ──────────────────────────────────────────────────────────────
     yoomoney_wallet: str
-    yoomoney_token: str
     # Секрет HTTP-уведомлений: настроить в кабинете ЮMoney.
     # None допустимо только в dev-окружении — в production ОБЯЗАТЕЛЕН.
     yoomoney_secret: str | None = None
