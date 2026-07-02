@@ -15,7 +15,16 @@ logger = get_logger(__name__)
 
 
 class PaymentService:
-    """Бизнес-логика платежей BerkHelperMarket."""
+    """
+    Бизнес-логика платежей BerkHelperMarket.
+
+    Правила:
+
+    • идемпотентность
+    • одна транзакция = одно начисление
+    • безопасен для повторных webhook
+    • готов к нескольким платежным системам
+    """
 
     def __init__(
         self,
@@ -28,8 +37,9 @@ class PaymentService:
         self._payment_repo = payment_repo
 
     @staticmethod
-    def _generate_label(telegram_id: int) -> str:
-        """Создает уникальный label платежа."""
+    def _generate_label(
+        telegram_id: int,
+    ) -> str:
         return f"bhm_{telegram_id}_{uuid.uuid4().hex[:12]}"
 
     async def create_payment(
@@ -37,12 +47,6 @@ class PaymentService:
         user: User,
         package: GenerationPackage,
     ) -> tuple[Payment, str]:
-        """
-        Создать новый платеж.
-
-        Возвращает:
-            (Payment, payment_url)
-        """
 
         label = self._generate_label(user.telegram_id)
 
@@ -75,57 +79,78 @@ class PaymentService:
         label: str,
     ) -> Payment | None:
         """
-        Подтвердить платеж.
+        Подтверждение платежа.
 
-        Метод полностью идемпотентный.
+        Метод полностью идемпотентен.
 
-        Повторный вызов никогда не начислит генерации повторно.
+        Повторные webhook безопасны.
+
+        Генерации начисляются только один раз.
         """
 
-        payment = await self._payment_repo.get_by_label(
-            label,
-            for_update=True,
-        )
+        try:
 
-        if payment is None:
-            logger.warning(
-                "payment_not_found",
-                label=label,
+            payment = await self._payment_repo.get_by_label(
+                label,
+                for_update=True,
             )
-            return None
 
-        if payment.status == PaymentStatus.PAID:
+            if payment is None:
+                logger.warning(
+                    "payment_not_found",
+                    label=label,
+                )
+                return None
+
+            if payment.status == PaymentStatus.PAID:
+                logger.info(
+                    "payment_already_confirmed",
+                    payment_id=payment.id,
+                    label=label,
+                )
+                return payment
+
+            user = await self._user_repo.get_by_id(
+                payment.user_id
+            )
+
+            if user is None:
+                logger.error(
+                    "payment_user_not_found",
+                    payment_id=payment.id,
+                    user_id=payment.user_id,
+                )
+
+                await self._session.rollback()
+                return None
+
+            await self._payment_repo.mark_paid(payment)
+
+            await self._user_repo.add_generations(
+                user,
+                payment.generations,
+            )
+
+            await self._session.commit()
+
             logger.info(
-                "payment_already_confirmed",
+                "payment_confirmed",
+                payment_id=payment.id,
                 label=label,
+                user_id=user.id,
+                generations=payment.generations,
+                balance=user.generation_balance,
             )
+
             return payment
 
-        user = await self._user_repo.get_by_id(payment.user_id)
+        except Exception:
 
-        if user is None:
-            logger.error(
-                "payment_user_not_found",
-                payment_id=payment.id,
-                user_id=payment.user_id,
+            await self._session.rollback()
+
+            logger.exception(
+                "payment_confirmation_failed",
+                label=label,
             )
-            return None
 
-        await self._payment_repo.mark_paid(payment)
-
-        await self._user_repo.add_generations(
-            user,
-            payment.generations,
-        )
-
-        await self._session.commit()
-
-        logger.info(
-            "payment_confirmed",
-            payment_id=payment.id,
-            user_id=user.id,
-            generations=payment.generations,
-            new_balance=user.generation_balance,
-        )
-
-        return payment
+            raise
