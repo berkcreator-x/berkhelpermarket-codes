@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -24,6 +25,13 @@ if TYPE_CHECKING:
 
 class Payment(Base):
     __tablename__ = "payments"
+
+    __table_args__ = (
+        Index("ix_payments_label", "label"),
+        Index("ix_payments_payment_id", "payment_id"),
+        Index("ix_payments_status", "status"),
+        Index("ix_payments_user_id", "user_id"),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer,
@@ -58,11 +66,13 @@ class Payment(Base):
 
     payment_id: Mapped[str] = mapped_column(
         String(255),
+        unique=True,
         nullable=False,
     )
 
     label: Mapped[str] = mapped_column(
         String(255),
+        unique=True,
         nullable=False,
     )
 
