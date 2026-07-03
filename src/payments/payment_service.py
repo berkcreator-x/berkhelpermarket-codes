@@ -1,102 +1,65 @@
 from __future__ import annotations
 
-import uuid
-from sqlalchemy.ext.asyncio import AsyncSession
+from dataclasses import dataclass
+from typing import Dict
 
-from src.models import Payment, PaymentStatus, User
-from src.payments.generation_package import GenerationPackage
-from src.payments.yoomoney_client import yoomoney_client
-from src.repositories.payment_repository import PaymentRepository
-from src.repositories.user_repository import UserRepository
+from src.models import User
 from src.utils import get_logger
 
 logger = get_logger(__name__)
 
 
+# ==========================================================
+# PACKAGES
+# ==========================================================
+
+@dataclass(slots=True)
+class GenerationPackage:
+    price_rub: int
+    generations: int
+
+
+GENERATION_PACKAGES: Dict[str, GenerationPackage] = {
+    "basic": GenerationPackage(price_rub=99, generations=20),
+    "pro": GenerationPackage(price_rub=199, generations=50),
+    "max": GenerationPackage(price_rub=399, generations=120),
+}
+
+
+# ==========================================================
+# SERVICE
+# ==========================================================
+
 class PaymentService:
-    """Бизнес-логика платежей BerkHelperMarket."""
+    """Логика платежей и выдачи пакетов генераций."""
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        user_repo: UserRepository,
-        payment_repo: PaymentRepository,
-    ) -> None:
-        self._session = session
-        self._user_repo = user_repo
-        self._payment_repo = payment_repo
+    def get_package(self, key: str) -> GenerationPackage:
+        if key not in GENERATION_PACKAGES:
+            raise ValueError(f"Unknown package: {key}")
+        return GENERATION_PACKAGES[key]
 
-    @staticmethod
-    def _generate_label(telegram_id: int) -> str:
-        return f"bhm_{telegram_id}_{uuid.uuid4().hex[:12]}"
-
-    async def create_payment(
+    async def apply_success_payment(
         self,
         user: User,
-        package: GenerationPackage,
-    ) -> tuple[Payment, str]:
+        package_key: str,
+    ) -> None:
+        """Начислить генерации пользователю после оплаты."""
 
-        label = self._generate_label(user.telegram_id)
+        package = self.get_package(package_key)
 
-        payment = await self._payment_repo.create(
-            user=user,
-            amount=package.price_rub,
-            generations=package.generations,
-            payment_id=label,
-            label=label,
-        )
-
-        payment_url = yoomoney_client.build_payment_url(
-            amount=package.price_rub,
-            label=label,
-        )
+        user.generation_balance += package.generations
 
         logger.info(
-            "payment_created",
-            payment_id=payment.id,
+            "payment_applied",
             user_id=user.id,
-            label=label,
+            package=package_key,
+            added=package.generations,
         )
 
-        return payment, payment_url
 
-    async def confirm_payment_by_label(self, label: str) -> Payment | None:
+# singleton
+payment_service = PaymentService()
 
-        payment = await self._payment_repo.get_by_label(
-            label,
-            for_update=True,
-        )
 
-        if not payment:
-            logger.warning("payment_not_found", label=label)
-            return None
-
-        if payment.status == PaymentStatus.PAID:
-            return payment
-
-        user = await self._user_repo.get_by_id(payment.user_id)
-
-        if not user:
-            logger.error(
-                "payment_user_not_found",
-                payment_id=payment.id,
-                user_id=payment.user_id,
-            )
-            return None
-
-        await self._payment_repo.mark_paid(payment)
-
-        await self._user_repo.add_generations(
-            user,
-            payment.generations,
-        )
-
-        await self._session.commit()
-
-        logger.info(
-            "payment_confirmed",
-            payment_id=payment.id,
-            user_id=user.id,
-        )
-
-        return payment
+def get_package(key: str) -> GenerationPackage:
+    return payment_service.get_package(key)
