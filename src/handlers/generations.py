@@ -8,7 +8,7 @@ from src.keyboards import (
     generation_packages_keyboard,
     payment_check_keyboard,
 )
-from src.payments import (
+from src.payments.payment_service import (
     GENERATION_PACKAGES,
     PaymentService,
     get_package,
