@@ -1,8 +1,7 @@
-from src.payments.package import GenerationPackage
-from src.payments.payment_service import PaymentService, get_package
+from src.payments.payment_service import PaymentService
+from src.payments.yoomoney_client import yoomoney_client
 
 __all__ = [
     "PaymentService",
-    "GenerationPackage",
-    "get_package",
+    "yoomoney_client",
 ]
