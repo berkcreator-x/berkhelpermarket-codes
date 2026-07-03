@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 
-from src.ai.proxyapi_client import ProxyAPIClient, proxyapi_client, ProxyAPIError
-from src.ai.prompt_builder import improve_product_prompt, new_product_prompt
+from src.ai.proxyapi_client import (
+    ProxyAPIClient,
+    ProxyAPIError,
+    proxyapi_client,
+)
+from src.ai.prompt_builder import (
+    improve_product_prompt,
+    new_product_prompt,
+)
 from src.exceptions import (
-    InsufficientBalanceError,
     AIServiceError,
-    GenerationError,
+    InsufficientBalanceError,
     ProductValidationError,
 )
 from src.models import GenerationType, User
@@ -29,10 +36,10 @@ GENERATION_COSTS: dict[GenerationType, int] = {
 
 
 # ==========================================================
-# SCHEMA
+# PRODUCT CARD
 # ==========================================================
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class ProductCard:
     title: str
     description: str
@@ -41,63 +48,91 @@ class ProductCard:
     characteristics: list[str] = field(default_factory=list)
 
     def to_message(self) -> str:
-        adv = "\n".join(f"• {a}" for a in self.advantages)
-        ch = "\n".join(f"• {c}" for c in self.characteristics)
+        advantages = "\n".join(
+            f"• {item}" for item in self.advantages
+        )
+
+        characteristics = "\n".join(
+            f"• {item}" for item in self.characteristics
+        )
 
         parts = [
             f"🏷 <b>Название</b>\n{self.title}",
             f"📝 <b>Описание</b>\n{self.description}",
-            f"⭐ <b>Преимущества</b>\n{adv}",
+            f"⭐ <b>Преимущества</b>\n{advantages}",
             f"🔍 <b>SEO</b>\n{self.seo}",
         ]
 
         if self.characteristics:
-            parts.append(f"📦 <b>Характеристики</b>\n{ch}")
+            parts.append(
+                f"📦 <b>Характеристики</b>\n{characteristics}"
+            )
 
         return "\n\n".join(parts)
 
 
 # ==========================================================
-# PARSER (MVP, но уже расширяемый)
+# PARSER
 # ==========================================================
 
 _SECTION_RE = {
-    "title": r"🏷.*?Название\s*(.*?)\n(?=📝|$)",
-    "description": r"📝.*?Описание\s*(.*?)\n(?=⭐|$)",
-    "advantages": r"⭐.*?Преимущества\s*(.*?)\n(?=🔍|$)",
-    "seo": r"🔍.*?SEO.*?\s*(.*?)\n(?=📦|$)",
-    "characteristics": r"📦.*?Характеристики\s*(.*)",
+    "title": r"(?:🏷\s*)?Название\s*(.*?)(?=\n(?:📝|Описание)|\Z)",
+    "description": r"(?:📝\s*)?Описание\s*(.*?)(?=\n(?:⭐|Преимущества)|\Z)",
+    "advantages": r"(?:⭐\s*)?Преимущества\s*(.*?)(?=\n(?:🔍|SEO)|\Z)",
+    "seo": r"(?:🔍\s*)?SEO.*?\s*(.*?)(?=\n(?:📦|Характеристики)|\Z)",
+    "characteristics": r"(?:📦\s*)?Характеристики\s*(.*)",
 }
 
 
 def _parse_list(text: str) -> list[str]:
     return [
-        x.strip("•- \t")
-        for x in text.splitlines()
-        if x.strip()
+        item.strip("•-* \t")
+        for item in text.splitlines()
+        if item.strip()
     ]
 
 
+def _extract(raw: str, key: str) -> str:
+    match = re.search(
+        _SECTION_RE[key],
+        raw,
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    if match is None:
+        return ""
+
+    return match.group(1).strip()
+
+
 def _parse_card(raw: str) -> ProductCard:
-    def pick(key: str) -> str:
-        m = re.search(_SECTION_RE[key], raw, re.DOTALL)
-        return m.group(1).strip() if m else ""
+    title = _extract(raw, "title")
+    description = _extract(raw, "description")
+    advantages = _parse_list(
+        _extract(raw, "advantages")
+    )
+    seo = _extract(raw, "seo")
+    characteristics = _parse_list(
+        _extract(raw, "characteristics")
+    )
 
-    title = pick("title")
-    desc = pick("description")
-    adv = _parse_list(pick("advantages"))
-    seo = pick("seo")
-    ch = _parse_list(pick("characteristics"))
+    if not title or not description:
 
-    if not title or not desc:
-        raise ProductValidationError("Invalid AI response format")
+        logger.warning(
+            "ai_invalid_structure",
+            preview=raw[:400],
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid response."
+        )
 
     return ProductCard(
         title=title,
-        description=desc,
-        advantages=adv,
+        description=description,
+        advantages=advantages,
         seo=seo,
-        characteristics=ch,
+        characteristics=characteristics,
     )
 
 
@@ -106,6 +141,7 @@ def _parse_card(raw: str) -> ProductCard:
 # ==========================================================
 
 class GenerationService:
+
     def __init__(
         self,
         user_repo: UserRepository,
@@ -123,8 +159,18 @@ class GenerationService:
         audience: str,
     ) -> ProductCard:
 
-        prompt = new_product_prompt(name, category, features, audience)
-        return await self._run(user, GenerationType.NEW, prompt)
+        prompt = new_product_prompt(
+            name,
+            category,
+            features,
+            audience,
+        )
+
+        return await self._run(
+            user,
+            GenerationType.NEW,
+            prompt,
+        )
 
     async def improve_product(
         self,
@@ -132,9 +178,15 @@ class GenerationService:
         existing_text: str,
     ) -> ProductCard:
 
-        prompt = improve_product_prompt(existing_text)
-        return await self._run(user, GenerationType.IMPROVE, prompt)
+        prompt = improve_product_prompt(
+            existing_text,
+        )
 
+        return await self._run(
+            user,
+            GenerationType.IMPROVE,
+            prompt,
+        )
     # ======================================================
     # CORE PIPELINE
     # ======================================================
@@ -146,39 +198,115 @@ class GenerationService:
         prompt: str,
     ) -> ProductCard:
 
+        started_at = time.perf_counter()
+
         cost = GENERATION_COSTS[gen_type]
 
-        # 1. BALANCE CHECK
+        # --------------------------------------------------
+        # 1. Проверка баланса
+        # --------------------------------------------------
+
         if user.generation_balance < cost:
+            logger.info(
+                "generation_not_enough_balance",
+                user_id=user.id,
+                required=cost,
+                current=user.generation_balance,
+            )
+
             raise InsufficientBalanceError(
                 f"Need {cost}, have {user.generation_balance}"
             )
 
-        # 2. AI CALL
+        # --------------------------------------------------
+        # 2. Генерация AI
+        # --------------------------------------------------
+
         try:
             raw = await self._client.generate(prompt)
-        except ProxyAPIError as e:
+
+        except ProxyAPIError as exc:
+
             logger.error(
-                "ai_error",
+                "proxyapi_generation_failed",
                 user_id=user.id,
-                error=str(e),
+                generation_type=gen_type.value,
+                prompt_length=len(prompt),
+                error=str(exc),
             )
-            raise AIServiceError("AI temporarily unavailable") from e
 
-        # 3. PARSE (before spending balance)
-        card = _parse_card(raw)
+            raise AIServiceError(
+                "AI temporarily unavailable."
+            ) from exc
 
-        # 4. SPEND BALANCE (atomic)
-        await self._user_repo.deduct_generations_safe(user, cost)
+        # --------------------------------------------------
+        # 3. Проверка пустого ответа
+        # --------------------------------------------------
 
-        # 5. LOG
-        await self._user_repo.log_generation(user, gen_type)
+        if not raw or not raw.strip():
+
+            logger.error(
+                "proxyapi_empty_response",
+                user_id=user.id,
+                generation_type=gen_type.value,
+            )
+
+            raise AIServiceError(
+                "AI returned empty response."
+            )
+
+        # --------------------------------------------------
+        # 4. Парсинг
+        # --------------------------------------------------
+
+        try:
+            card = _parse_card(raw)
+
+        except ProductValidationError:
+
+            logger.error(
+                "generation_invalid_ai_response",
+                user_id=user.id,
+                generation_type=gen_type.value,
+                preview=raw[:600],
+            )
+
+            raise
+
+        # --------------------------------------------------
+        # 5. Атомарное списание генераций
+        # --------------------------------------------------
+
+        await self._user_repo.deduct_generations_safe(
+            user=user,
+            amount=cost,
+        )
+
+        # --------------------------------------------------
+        # 6. Лог генерации
+        # --------------------------------------------------
+
+        await self._user_repo.log_generation(
+            user=user,
+            gen_type=gen_type,
+        )
+
+        # --------------------------------------------------
+        # 7. Финальный лог
+        # --------------------------------------------------
+
+        duration_ms = int(
+            (time.perf_counter() - started_at) * 1000
+        )
 
         logger.info(
-            "generation_success",
+            "generation_completed",
             user_id=user.id,
-            cost=cost,
-            remaining=user.generation_balance,
+            generation_type=gen_type.value,
+            spent=cost,
+            balance=user.generation_balance,
+            duration_ms=duration_ms,
+            prompt_length=len(prompt),
         )
 
         return card
