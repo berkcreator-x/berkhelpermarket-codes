@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import uuid
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import Payment, PaymentStatus, User
-from src.payments.package import GenerationPackage
+from src.payments.generation_package import GenerationPackage
 from src.payments.yoomoney_client import yoomoney_client
 from src.repositories.payment_repository import PaymentRepository
 from src.repositories.user_repository import UserRepository
@@ -15,16 +14,7 @@ logger = get_logger(__name__)
 
 
 class PaymentService:
-    """
-    Бизнес-логика платежей BerkHelperMarket.
-
-    Правила:
-
-    • идемпотентность
-    • одна транзакция = одно начисление
-    • безопасен для повторных webhook
-    • готов к нескольким платежным системам
-    """
+    """Бизнес-логика платежей BerkHelperMarket."""
 
     def __init__(
         self,
@@ -37,9 +27,7 @@ class PaymentService:
         self._payment_repo = payment_repo
 
     @staticmethod
-    def _generate_label(
-        telegram_id: int,
-    ) -> str:
+    def _generate_label(telegram_id: int) -> str:
         return f"bhm_{telegram_id}_{uuid.uuid4().hex[:12]}"
 
     async def create_payment(
@@ -68,89 +56,47 @@ class PaymentService:
             payment_id=payment.id,
             user_id=user.id,
             label=label,
-            amount=package.price_rub,
-            generations=package.generations,
         )
 
         return payment, payment_url
 
-    async def confirm_payment_by_label(
-        self,
-        label: str,
-    ) -> Payment | None:
-        """
-        Подтверждение платежа.
+    async def confirm_payment_by_label(self, label: str) -> Payment | None:
 
-        Метод полностью идемпотентен.
+        payment = await self._payment_repo.get_by_label(
+            label,
+            for_update=True,
+        )
 
-        Повторные webhook безопасны.
+        if not payment:
+            logger.warning("payment_not_found", label=label)
+            return None
 
-        Генерации начисляются только один раз.
-        """
-
-        try:
-
-            payment = await self._payment_repo.get_by_label(
-                label,
-                for_update=True,
-            )
-
-            if payment is None:
-                logger.warning(
-                    "payment_not_found",
-                    label=label,
-                )
-                return None
-
-            if payment.status == PaymentStatus.PAID:
-                logger.info(
-                    "payment_already_confirmed",
-                    payment_id=payment.id,
-                    label=label,
-                )
-                return payment
-
-            user = await self._user_repo.get_by_id(
-                payment.user_id
-            )
-
-            if user is None:
-                logger.error(
-                    "payment_user_not_found",
-                    payment_id=payment.id,
-                    user_id=payment.user_id,
-                )
-
-                await self._session.rollback()
-                return None
-
-            await self._payment_repo.mark_paid(payment)
-
-            await self._user_repo.add_generations(
-                user,
-                payment.generations,
-            )
-
-            await self._session.commit()
-
-            logger.info(
-                "payment_confirmed",
-                payment_id=payment.id,
-                label=label,
-                user_id=user.id,
-                generations=payment.generations,
-                balance=user.generation_balance,
-            )
-
+        if payment.status == PaymentStatus.PAID:
             return payment
 
-        except Exception:
+        user = await self._user_repo.get_by_id(payment.user_id)
 
-            await self._session.rollback()
-
-            logger.exception(
-                "payment_confirmation_failed",
-                label=label,
+        if not user:
+            logger.error(
+                "payment_user_not_found",
+                payment_id=payment.id,
+                user_id=payment.user_id,
             )
+            return None
 
-            raise
+        await self._payment_repo.mark_paid(payment)
+
+        await self._user_repo.add_generations(
+            user,
+            payment.generations,
+        )
+
+        await self._session.commit()
+
+        logger.info(
+            "payment_confirmed",
+            payment_id=payment.id,
+            user_id=user.id,
+        )
+
+        return payment
