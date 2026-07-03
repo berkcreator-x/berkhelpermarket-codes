@@ -24,7 +24,7 @@ def _get_http_client() -> httpx.AsyncClient:
 
 
 class YooMoneyClient:
-    """Генерация payment URL для YooMoney (без API проверки)."""
+    """Только генерация платежной ссылки (без API проверки)."""
 
     def __init__(self) -> None:
         self._wallet = settings.yoomoney_wallet
@@ -33,12 +33,13 @@ class YooMoneyClient:
         params = {
             "receiver": self._wallet,
             "quickpay-form": "shop",
-            "targets": "Покупка генераций BerkHelperMarket",
+            "targets": "Покупка генераций",
             "paymentType": "AC",
             "sum": f"{amount:.2f}",
             "label": label,
             "successURL": settings.payment_success_url,
         }
+
         return f"{YOOMONEY_QUICKPAY_URL}?{urlencode(params)}"
 
 
