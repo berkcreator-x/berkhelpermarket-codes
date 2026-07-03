@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import Payment, PaymentStatus, User
-from src.payments import GenerationPackage
+from src.payments.package import GenerationPackage
 from src.payments.yoomoney_client import yoomoney_client
 from src.repositories.payment_repository import PaymentRepository
 from src.repositories.user_repository import UserRepository
