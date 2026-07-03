@@ -1,13 +1,7 @@
-from src.models.enums import GenerationType, PaymentStatus, PlanType
-from src.models.generation_log import GenerationLog
-from src.models.payment import Payment
-from src.models.user import User
+from src.payments.payment_service import PaymentService
+from src.payments.yoomoney_client import yoomoney_client
 
 __all__ = [
-    "User",
-    "GenerationLog",
-    "Payment",
-    "PlanType",
-    "GenerationType",
-    "PaymentStatus",
+    "PaymentService",
+    "yoomoney_client",
 ]
