@@ -1,17 +1,8 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Any
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class GenerationPackage:
-    """
-    Пакет генераций.
-
-    frozen=True → защита от случайных изменений
-    slots=True → меньше памяти и быстрее доступ (важно для 1000+ пользователей)
-    """
     id: str
     title: str
     price_rub: int
@@ -40,16 +31,5 @@ GENERATION_PACKAGES: dict[str, GenerationPackage] = {
 }
 
 
-def get_package(package_id: Any) -> GenerationPackage | None:
-    """
-    Безопасное получение пакета.
-
-    Fix:
-    - защита от str/None/invalid input
-    - предотвращает твою ошибку 'str has no attribute price_rub'
-    """
-
-    if not isinstance(package_id, str):
-        return None
-
+def get_package(package_id: str) -> GenerationPackage | None:
     return GENERATION_PACKAGES.get(package_id)
