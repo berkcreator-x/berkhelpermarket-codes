@@ -5,6 +5,7 @@ from src.payments.packages import (
 )
 
 from src.payments.payment_service import PaymentService
+from src.payments.yoomoney_client import yoomoney_client, YooMoneyClient
 from src.payments.webhook import register_webhook_routes
 
 __all__ = [
@@ -12,5 +13,7 @@ __all__ = [
     "GENERATION_PACKAGES",
     "get_package",
     "PaymentService",
+    "yoomoney_client",
+    "YooMoneyClient",
     "register_webhook_routes",
 ]
