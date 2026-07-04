@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-from src.payments.payment_service import GENERATION_PACKAGES
+from src.payments import GENERATION_PACKAGES
 
 
 def main_menu_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
