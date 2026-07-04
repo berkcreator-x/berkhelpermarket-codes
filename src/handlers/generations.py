@@ -97,15 +97,15 @@ async def buy_package(
     )
 
     payment_service = PaymentService(
-        user_repo,
-        payment_repo,
-    )
+    session=session,
+    user_repo=user_repo,
+    payment_repo=payment_repo,
+)
 
-    payment, payment_url = await payment_service.create_payment(
-        user=user,
-        package=package,
-    )
-
+payment, payment_url = await payment_service.create_payment(
+    user=user,
+    package=package,
+)
     await callback.message.answer(
         (
             f"💳 <b>{package.title}</b>\n\n"
