@@ -106,7 +106,8 @@ payment, payment_url = await payment_service.create_payment(
     user=user,
     package=package,
 )
-    await callback.message.answer(
+    
+await callback.message.answer(
         (
             f"💳 <b>{package.title}</b>\n\n"
 
