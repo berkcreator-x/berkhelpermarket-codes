@@ -22,6 +22,8 @@ from src.models.enums import PaymentStatus
 if TYPE_CHECKING:
     from src.models.user import User
 
+STRING_LENGTH = 255
+
 
 class Payment(Base):
     __tablename__ = "payments"
@@ -40,7 +42,10 @@ class Payment(Base):
     )
 
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+        ),
         nullable=False,
     )
 
@@ -58,20 +63,20 @@ class Payment(Base):
         Enum(
             PaymentStatus,
             name="payment_status",
-            values_callable=lambda x: [e.value for e in x],
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
         ),
         default=PaymentStatus.PENDING,
         nullable=False,
     )
 
     payment_id: Mapped[str] = mapped_column(
-        String(255),
+        String(STRING_LENGTH),
         unique=True,
         nullable=False,
     )
 
     label: Mapped[str] = mapped_column(
-        String(255),
+        String(STRING_LENGTH),
         unique=True,
         nullable=False,
     )
@@ -91,4 +96,25 @@ class Payment(Base):
 
     user: Mapped["User"] = relationship(
         back_populates="payments",
+        lazy="selectin",
     )
+
+    def __repr__(self) -> str:
+        return (
+            f"<Payment("
+            f"id={self.id}, "
+            f"user_id={self.user_id}, "
+            f"status={self.status.value}, "
+            f"amount={self.amount}, "
+            f"generations={self.generations}"
+            f")>"
+        )
+
+    def __str__(self) -> str:
+        return (
+            f"Payment("
+            f"id={self.id}, "
+            f"status={self.status.value}, "
+            f"label={self.label}"
+            f")"
+        )
