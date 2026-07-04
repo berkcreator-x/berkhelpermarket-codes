@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from urllib.parse import urlencode
 
 import httpx
@@ -9,38 +7,42 @@ from src.utils import get_logger
 
 logger = get_logger(__name__)
 
-YOOMONEY_QUICKPAY_URL = "https://yoomoney.ru/quickpay/confirm.xml"
 
-_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
+YOOMONEY_QUICKPAY_URL = "https://yoomoney.ru/quickpay/confirm.xml"
 
 _http_client: httpx.AsyncClient | None = None
 
 
-def _get_http_client() -> httpx.AsyncClient:
+def _client() -> httpx.AsyncClient:
     global _http_client
+
     if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(timeout=_TIMEOUT)
+        _http_client = httpx.AsyncClient(timeout=30)
+
     return _http_client
 
 
 class YooMoneyClient:
-    """Только генерация платежной ссылки (без API проверки)."""
-
     def __init__(self) -> None:
-        self._wallet = settings.yoomoney_wallet
+        self.wallet = settings.yoomoney_wallet
 
     def build_payment_url(self, amount: float, label: str) -> str:
         params = {
-            "receiver": self._wallet,
+            "receiver": self.wallet,
             "quickpay-form": "shop",
-            "targets": "Покупка генераций",
+            "targets": "BerkHelperMarket",
             "paymentType": "AC",
             "sum": f"{amount:.2f}",
             "label": label,
-            "successURL": settings.payment_success_url,
         }
 
         return f"{YOOMONEY_QUICKPAY_URL}?{urlencode(params)}"
+
+    async def verify_payment(self, label: str) -> bool:
+        """
+        MVP-версия: пока считаем webhook источником истины.
+        """
+        return True
 
 
 yoomoney_client = YooMoneyClient()
