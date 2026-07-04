@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from src.models import Payment, PaymentStatus, User
+from src.models.enums import PaymentStatus
+from src.models.payment import Payment
+from src.models.user import User
 
 
 class PaymentRepository:
     """
     Репозиторий платежей.
 
+    Отвечает только за работу с БД.
     Не содержит бизнес-логики.
-    Только работа с БД.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -25,12 +30,11 @@ class PaymentRepository:
         self,
         *,
         user: User,
-        amount: float,
+        amount: Decimal,
         generations: int,
         payment_id: str,
         label: str,
     ) -> Payment:
-
         payment = Payment(
             user_id=user.id,
             amount=amount,
@@ -41,7 +45,6 @@ class PaymentRepository:
         )
 
         self._session.add(payment)
-
         await self._session.flush()
 
         return payment
@@ -50,13 +53,18 @@ class PaymentRepository:
     # GETTERS
     # =====================================================
 
+    async def get_by_id(
+        self,
+        payment_id: int,
+    ) -> Payment | None:
+        return await self._session.get(Payment, payment_id)
+
     async def get_by_label(
         self,
         label: str,
         *,
         for_update: bool = False,
     ) -> Payment | None:
-
         stmt = (
             select(Payment)
             .where(Payment.label == label)
@@ -73,7 +81,6 @@ class PaymentRepository:
         self,
         payment_id: str,
     ) -> Payment | None:
-
         stmt = (
             select(Payment)
             .where(Payment.payment_id == payment_id)
@@ -83,15 +90,29 @@ class PaymentRepository:
 
         return result.scalar_one_or_none()
 
-    async def get_by_id(
+    async def get_with_user(
         self,
-        payment_id: int,
+        label: str,
+        *,
+        for_update: bool = False,
     ) -> Payment | None:
+        """
+        Получить платеж сразу вместе с пользователем.
+        Полезно для webhook и админки.
+        """
 
-        return await self._session.get(
-            Payment,
-            payment_id,
+        stmt = (
+            select(Payment)
+            .options(selectinload(Payment.user))
+            .where(Payment.label == label)
         )
+
+        if for_update:
+            stmt = stmt.with_for_update()
+
+        result = await self._session.execute(stmt)
+
+        return result.scalar_one_or_none()
 
     # =====================================================
     # STATUS
@@ -101,33 +122,24 @@ class PaymentRepository:
         self,
         payment: Payment,
     ) -> Payment:
-
         payment.status = PaymentStatus.PAID
-
         await self._session.flush()
-
         return payment
 
     async def mark_failed(
         self,
         payment: Payment,
     ) -> Payment:
-
         payment.status = PaymentStatus.FAILED
-
         await self._session.flush()
-
         return payment
 
     async def mark_canceled(
         self,
         payment: Payment,
     ) -> Payment:
-
         payment.status = PaymentStatus.CANCELED
-
         await self._session.flush()
-
         return payment
 
     # =====================================================
@@ -139,7 +151,6 @@ class PaymentRepository:
         user: User,
         limit: int = 20,
     ) -> list[Payment]:
-
         stmt = (
             select(Payment)
             .where(Payment.user_id == user.id)
@@ -155,7 +166,6 @@ class PaymentRepository:
         self,
         limit: int = 100,
     ) -> list[Payment]:
-
         stmt = (
             select(Payment)
             .where(Payment.status == PaymentStatus.PENDING)
