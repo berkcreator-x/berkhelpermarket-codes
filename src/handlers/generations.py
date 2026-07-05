@@ -103,10 +103,10 @@ async def buy_package(
         payment_repo=payment_repo,
     )
 
-    _, payment_url = await payment_service.create_payment(
-        user=user,
-        package=package,
-    )
+    payment, payment_url = await payment_service.create_payment(
+    user=user,
+    package=package,
+)
 
     await callback.message.answer(
         (
