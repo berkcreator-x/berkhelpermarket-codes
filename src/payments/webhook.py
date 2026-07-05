@@ -16,8 +16,9 @@ logger = get_logger(__name__)
 
 YOOMONEY_WEBHOOK_PATH = "/webhook/yoomoney"
 
-# Временная защита от спама webhook.
-# Главная защита — PaymentStatus.PAID внутри PaymentService.
+# Защита от шквала одинаковых webhook.
+# Основная защита всё равно находится внутри PaymentService
+# через PaymentStatus.PAID + SELECT FOR UPDATE.
 _PROCESSED_LABELS: dict[str, float] = {}
 _LABEL_TTL_SECONDS = 600
 
@@ -31,17 +32,19 @@ def _is_valid_signature(data: dict[str, str]) -> bool:
         logger.error("yoomoney_secret_not_configured")
         return False
 
-    source = "&".join([
-        data.get("notification_type", ""),
-        data.get("operation_id", ""),
-        data.get("amount", ""),
-        data.get("currency", ""),
-        data.get("datetime", ""),
-        data.get("sender", ""),
-        data.get("codepro", ""),
-        settings.yoomoney_secret,
-        data.get("label", ""),
-    ])
+    source = "&".join(
+        [
+            data.get("notification_type", ""),
+            data.get("operation_id", ""),
+            data.get("amount", ""),
+            data.get("currency", ""),
+            data.get("datetime", ""),
+            data.get("sender", ""),
+            data.get("codepro", ""),
+            settings.yoomoney_secret,
+            data.get("label", ""),
+        ]
+    )
 
     expected = hashlib.sha1(
         source.encode("utf-8")
@@ -57,13 +60,13 @@ def _cleanup_cache() -> None:
     now = time.time()
 
     expired = [
-        key
-        for key, value in _PROCESSED_LABELS.items()
-        if now - value > _LABEL_TTL_SECONDS
+        label
+        for label, created in _PROCESSED_LABELS.items()
+        if now - created > _LABEL_TTL_SECONDS
     ]
 
-    for key in expired:
-        _PROCESSED_LABELS.pop(key, None)
+    for label in expired:
+        _PROCESSED_LABELS.pop(label, None)
 
 
 def _is_duplicate(label: str) -> bool:
@@ -77,20 +80,12 @@ def _is_duplicate(label: str) -> bool:
 
 
 def _is_valid_payload(data: dict[str, str]) -> bool:
-
-    if data.get("notification_type") != "p2p-incoming":
-        return False
-
-    if not data.get("label"):
-        return False
-
-    if data.get("currency") != "643":
-        return False
-
-    if data.get("receiver") != settings.yoomoney_wallet:
-        return False
-
-    return True
+    return (
+        data.get("notification_type") == "p2p-incoming"
+        and bool(data.get("label"))
+        and data.get("currency") == "643"
+        and data.get("receiver") == settings.yoomoney_wallet
+    )
 
 
 # =====================================================
@@ -154,13 +149,46 @@ async def yoomoney_webhook_handler(
 
     async with AsyncSessionLocal() as session:
 
+        user_repo = UserRepository(session)
+        payment_repo = PaymentRepository(session)
+
         service = PaymentService(
             session=session,
-            user_repo=UserRepository(session),
-            payment_repo=PaymentRepository(session),
+            user_repo=user_repo,
+            payment_repo=payment_repo,
         )
 
-        await service.confirm_payment_by_label(label)
+        payment = await service.confirm_payment_by_label(
+            label
+        )
+
+        if payment is None:
+            return web.Response(
+                status=200,
+                text="not confirmed",
+            )
+
+        user = await user_repo.get_by_id(
+            payment.user_id,
+        )
+
+        if user is None:
+            logger.error(
+                "payment_user_not_found_after_confirmation",
+                payment_id=payment.id,
+                user_id=payment.user_id,
+            )
+            return web.Response(
+                status=200,
+                text="user missing",
+            )
+
+        # Здесь в будущем будет:
+        #
+        # await bot.send_message(...)
+        #
+        # Сейчас архитектура уже готова —
+        # осталось только получить экземпляр Bot.
 
     logger.info(
         "webhook_processed",
