@@ -10,20 +10,43 @@ from src.config import settings
 from src.handlers import get_main_router
 from src.middlewares import DBSessionMiddleware, RateLimitMiddleware
 
+# Singleton экземпляр Bot.
+# Используется Telegram webhook, YooMoney webhook и будущими фоновыми задачами.
+# Благодаря этому во всём приложении существует только одно соединение с Bot API.
+_bot: Bot | None = None
+
 
 def create_bot() -> Bot:
-    return Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    global _bot
+
+    if _bot is None:
+        _bot = Bot(
+            token=settings.bot_token,
+            default=DefaultBotProperties(
+                parse_mode=ParseMode.HTML,
+            ),
+        )
+
+    return _bot
 
 
 def create_dispatcher(redis: Redis) -> Dispatcher:
     storage = RedisStorage(redis=redis)
-    dispatcher = Dispatcher(storage=storage)
 
-    dispatcher.update.middleware(RateLimitMiddleware(redis=redis))
-    dispatcher.update.middleware(DBSessionMiddleware())
+    dispatcher = Dispatcher(
+        storage=storage,
+    )
 
-    dispatcher.include_router(get_main_router())
+    dispatcher.update.middleware(
+        RateLimitMiddleware(redis=redis),
+    )
+
+    dispatcher.update.middleware(
+        DBSessionMiddleware(),
+    )
+
+    dispatcher.include_router(
+        get_main_router(),
+    )
+
     return dispatcher
