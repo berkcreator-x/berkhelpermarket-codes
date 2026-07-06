@@ -221,7 +221,7 @@ async def yoomoney_webhook_handler(
 
                 if user is not None:
 
-try:
+                    try:
 
                         await _bot.send_message(
                             chat_id=user.telegram_id,
@@ -241,3 +241,34 @@ try:
                             "payment_notification_failed",
                             user_id=user.id,
                         )
+
+    logger.info(
+        "webhook_processed",
+        label=label,
+        duration_ms=round(
+            (
+                time.perf_counter()
+                - started
+            ) * 1000
+        ),
+    )
+
+    return web.Response(
+        status=200,
+        text="OK",
+    )
+
+
+def register_webhook_routes(
+    app: web.Application,
+    bot: Bot,
+) -> None:
+
+    global _bot
+
+    _bot = bot
+
+    app.router.add_post(
+        YOOMONEY_WEBHOOK_PATH,
+        yoomoney_webhook_handler,
+    )
