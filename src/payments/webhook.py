@@ -221,7 +221,7 @@ async def yoomoney_webhook_handler(
 
                 if user is not None:
 
-                    try:
+try:
 
                         await _bot.send_message(
                             chat_id=user.telegram_id,
@@ -231,3 +231,13 @@ async def yoomoney_webhook_handler(
                                 f"<b>{payment.generations}</b> генераций.\n\n"
                                 f"💎 Баланс: "
                                 f"<b>{user.generation_balance}</b> генераций.\n\n"
+                                "Спасибо за покупку ❤️"
+                            ),
+                        )
+
+                    except Exception:
+
+                        logger.exception(
+                            "payment_notification_failed",
+                            user_id=user.id,
+                        )
