@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+from urllib.parse import quote
 
 from aiogram import Bot
 from aiohttp import web
@@ -63,8 +64,10 @@ def _is_valid_signature(
         if key != "sign"
     }
 
+    # ВАЖНО: значения нужно URL-кодировать (RFC 3986, UTF-8),
+    # именно этого шага не хватало раньше.
     source = "&".join(
-        f"{key}={params[key]}"
+        f"{key}={quote(str(params[key]), safe='')}"
         for key in sorted(params)
     )
 
@@ -79,10 +82,6 @@ def _is_valid_signature(
         sign,
     )
 
-    # ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ЛОГ.
-    # Секрет НЕ логируется, только сама строка,
-    # ожидаемый хэш и полученный хэш.
-    # Убрать после того, как разберёмся.
     logger.info(
         "signature_debug",
         source=source,
@@ -139,6 +138,9 @@ def _is_valid_payload(
     if not data.get("label"):
         return False
 
+    # receiver присутствует только при p2p-incoming.
+    # При card-incoming YooMoney это поле не присылает,
+    # поэтому проверяем receiver, только если он есть.
     receiver = data.get("receiver")
 
     if receiver and receiver != settings.yoomoney_wallet:
@@ -214,6 +216,11 @@ async def yoomoney_webhook_handler(
             status=400,
             text="invalid signature",
         )
+
+    # Это только защита от спама.
+    # Даже если убрать этот кэш,
+    # PaymentService всё равно
+    # не начислит генерации дважды.
 
     if _is_duplicate(label):
 
