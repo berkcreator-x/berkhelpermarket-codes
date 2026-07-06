@@ -50,7 +50,10 @@ async def run_webhook(bot: Bot, dispatcher: Dispatcher) -> None:
     app.router.add_get("/", health)
     app.router.add_get("/health", health)
 
-    register_webhook_routes(app)
+    register_webhook_routes(
+        app=app,
+        bot=bot,
+    )
 
     SimpleRequestHandler(dispatcher=dispatcher, bot=bot).register(app, path=TELEGRAM_WEBHOOK_PATH)
     setup_application(app, dispatcher, bot=bot)
@@ -83,7 +86,6 @@ async def _close_httpx_clients() -> None:
 
     if proxy_module._http_client is not None and not proxy_module._http_client.is_closed:
         await proxy_module._http_client.aclose()
-
     if yoomoney_module._http_client is not None and not yoomoney_module._http_client.is_closed:
         await yoomoney_module._http_client.aclose()
 
