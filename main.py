@@ -80,13 +80,25 @@ async def run_polling(bot: Bot, dispatcher: Dispatcher) -> None:
 
 
 async def _close_httpx_clients() -> None:
-    """Закрыть singleton httpx-клиенты при завершении процесса."""
+    """
+    Закрыть singleton httpx-клиенты.
+    """
+
     import src.ai.proxyapi_client as proxy_module
     import src.payments.yoomoney_client as yoomoney_module
 
-    if proxy_module._http_client is not None and not proxy_module._http_client.is_closed:
+    if (
+        hasattr(proxy_module, "_http_client")
+        and proxy_module._http_client is not None
+        and not proxy_module._http_client.is_closed
+    ):
         await proxy_module._http_client.aclose()
-    if yoomoney_module._http_client is not None and not yoomoney_module._http_client.is_closed:
+
+    if (
+        hasattr(yoomoney_module, "_http_client")
+        and yoomoney_module._http_client is not None
+        and not yoomoney_module._http_client.is_closed
+    ):
         await yoomoney_module._http_client.aclose()
 
 
