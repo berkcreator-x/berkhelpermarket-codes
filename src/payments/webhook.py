@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import time
 
+from aiogram import Bot
 from aiohttp import web
 
 from src.config import settings
@@ -28,6 +29,8 @@ YOOMONEY_WEBHOOK_PATH = "/webhook/yoomoney"
 _PROCESSED_LABELS: dict[str, float] = {}
 
 _LABEL_TTL_SECONDS = 600
+
+_bot: Bot | None = None
 
 
 # =====================================================
@@ -208,28 +211,23 @@ async def yoomoney_webhook_handler(
                 label=label,
             )
 
-    logger.info(
-        "webhook_processed",
-        label=label,
-        duration_ms=round(
-            (
-                time.perf_counter()
-                - started
-            ) * 1000
-        ),
-    )
+        else:
 
-    return web.Response(
-        status=200,
-        text="OK",
-    )
+            if _bot is not None:
 
+                user = await UserRepository(session).get_by_id(
+                    payment.user_id,
+                )
 
-def register_webhook_routes(
-    app: web.Application,
-) -> None:
+                if user is not None:
 
-    app.router.add_post(
-        YOOMONEY_WEBHOOK_PATH,
-        yoomoney_webhook_handler,
-    )
+                    try:
+
+                        await _bot.send_message(
+                            chat_id=user.telegram_id,
+                            text=(
+                                "🎉 <b>Оплата получена!</b>\n\n"
+                                f"На ваш баланс начислено "
+                                f"<b>{payment.generations}</b> генераций.\n\n"
+                                f"💎 Баланс: "
+                                f"<b>{user.generation_balance}</b> генераций.\n\n"
