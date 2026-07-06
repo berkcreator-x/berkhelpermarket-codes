@@ -41,13 +41,15 @@ def _is_valid_signature(
     data: dict[str, str],
 ) -> bool:
 
-    if not settings.yoomoney_secret:
+    secret = (settings.yoomoney_secret or "").strip()
+
+    if not secret:
         logger.error(
             "yoomoney_secret_not_configured",
         )
         return False
 
-    sign = data.get("sign")
+    sign = data.get("sign", "").strip()
 
     if not sign:
         logger.warning(
@@ -55,9 +57,6 @@ def _is_valid_signature(
         )
         return False
 
-    # YooMoney: HMAC-SHA256 по всем параметрам уведомления
-    # (кроме самого sign), ключи отсортированы по алфавиту,
-    # значения склеены как key=value через &.
     params = {
         key: value
         for key, value in data.items()
@@ -70,15 +69,30 @@ def _is_valid_signature(
     )
 
     expected = hmac.new(
-        settings.yoomoney_secret.encode("utf-8"),
+        secret.encode("utf-8"),
         source.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
 
-    return hmac.compare_digest(
+    is_valid = hmac.compare_digest(
         expected,
         sign,
     )
+
+    # ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ЛОГ.
+    # Секрет НЕ логируется, только сама строка,
+    # ожидаемый хэш и полученный хэш.
+    # Убрать после того, как разберёмся.
+    logger.info(
+        "signature_debug",
+        source=source,
+        expected=expected,
+        received=sign,
+        secret_len=len(secret),
+        match=is_valid,
+    )
+
+    return is_valid
 
 
 def _cleanup_cache() -> None:
@@ -125,9 +139,6 @@ def _is_valid_payload(
     if not data.get("label"):
         return False
 
-    # receiver присутствует только при p2p-incoming.
-    # При card-incoming YooMoney это поле не присылает,
-    # поэтому проверяем receiver, только если он есть.
     receiver = data.get("receiver")
 
     if receiver and receiver != settings.yoomoney_wallet:
@@ -203,11 +214,6 @@ async def yoomoney_webhook_handler(
             status=400,
             text="invalid signature",
         )
-
-    # Это только защита от спама.
-    # Даже если убрать этот кэш,
-    # PaymentService всё равно
-    # не начислит генерации дважды.
 
     if _is_duplicate(label):
 
