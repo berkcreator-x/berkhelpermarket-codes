@@ -127,6 +127,11 @@ async def yoomoney_webhook_handler(
             await request.post()
         )
 
+        logger.info(
+            "webhook_raw",
+            data=data,
+        )
+
     except Exception:
 
         logger.exception(
