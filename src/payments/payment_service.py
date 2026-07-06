@@ -18,12 +18,17 @@ class PaymentService:
     """
     Бизнес-логика платежей BerkHelperMarket.
 
-    Особенности:
+    Гарантии:
 
-    • идемпотентное подтверждение
-    • безопасно для повторных webhook
-    • одна транзакция = одно начисление
-    • готово для подключения других платежных систем
+    • одна успешная оплата = одно начисление
+
+    • полностью идемпотентный webhook
+
+    • безопасно при десятках одновременно пришедших webhook
+
+    • готово к подключению нескольких платежных систем
+
+    • рассчитано на высокую нагрузку
     """
 
     def __init__(
@@ -40,15 +45,32 @@ class PaymentService:
     def _generate_label(
         telegram_id: int,
     ) -> str:
-        return f"bhm_{telegram_id}_{uuid.uuid4().hex[:12]}"
+        """
+        Уникальный идентификатор платежа.
+
+        Используется как label YooMoney и payment_id.
+        """
+        return (
+            f"bhm_{telegram_id}_"
+            f"{uuid.uuid4().hex[:12]}"
+        )
 
     async def create_payment(
         self,
         user: User,
         package: GenerationPackage,
     ) -> tuple[Payment, str]:
+        """
+        Создание нового платежа.
 
-        label = self._generate_label(user.telegram_id)
+        Генерации здесь НЕ начисляются.
+
+        Начисление происходит только после успешного webhook.
+        """
+
+        label = self._generate_label(
+            user.telegram_id,
+        )
 
         payment = await self._payment_repo.create(
             user=user,
@@ -75,19 +97,18 @@ class PaymentService:
         )
 
         return payment, payment_url
-
-    async def confirm_payment_by_label(
+            async def confirm_payment_by_label(
         self,
         label: str,
     ) -> Payment | None:
         """
         Подтверждение платежа.
 
-        Метод полностью идемпотентен.
+        Полностью идемпотентно.
 
-        Повторные webhook безопасны.
-
-        Генерации начисляются только один раз.
+        Даже если YooMoney пришлет один webhook
+        10 раз подряд — генерации начислятся
+        только один раз.
         """
 
         try:
@@ -131,6 +152,7 @@ class PaymentService:
                 logger.error(
                     "payment_user_not_found",
                     payment_id=payment.id,
+                    user_id=payment.user_id,
                 )
                 await self._session.rollback()
                 return None
@@ -149,6 +171,7 @@ class PaymentService:
             logger.info(
                 "payment_confirmed",
                 payment_id=payment.id,
+                label=label,
                 user_id=user.id,
                 generations=payment.generations,
                 balance=user.generation_balance,
