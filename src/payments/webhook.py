@@ -63,9 +63,15 @@ def _is_valid_signature(
         source.encode("utf-8"),
     ).hexdigest()
 
+    received_hash = (
+        data.get("sha1_hash")
+        or data.get("sign")
+        or ""
+    )
+
     return hmac.compare_digest(
         expected,
-        data.get("sha1_hash", ""),
+        received_hash,
     )
 
 
@@ -105,7 +111,7 @@ def _is_valid_payload(
 ) -> bool:
 
     return (
-        data.get("notification_type") == "p2p-incoming"
+        data.get("notification_type") in ("p2p-incoming", "card-incoming")
         and data.get("currency") == "643"
         and data.get("receiver") == settings.yoomoney_wallet
         and bool(data.get("label"))
@@ -217,6 +223,13 @@ async def yoomoney_webhook_handler(
             )
 
         else:
+
+            logger.info(
+                "payment_confirmed",
+                label=label,
+                user_id=payment.user_id,
+                generations=payment.generations,
+            )
 
             if _bot is not None:
 
