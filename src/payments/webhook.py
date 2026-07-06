@@ -47,31 +47,37 @@ def _is_valid_signature(
         )
         return False
 
-    source = "&".join([
-        data.get("notification_type", ""),
-        data.get("operation_id", ""),
-        data.get("amount", ""),
-        data.get("currency", ""),
-        data.get("datetime", ""),
-        data.get("sender", ""),
-        data.get("codepro", ""),
-        settings.yoomoney_secret,
-        data.get("label", ""),
-    ])
+    sign = data.get("sign")
 
-    expected = hashlib.sha1(
-        source.encode("utf-8"),
-    ).hexdigest()
+    if not sign:
+        logger.warning(
+            "missing_sign_field",
+        )
+        return False
 
-    received_hash = (
-        data.get("sha1_hash")
-        or data.get("sign")
-        or ""
+    # YooMoney: HMAC-SHA256 по всем параметрам уведомления
+    # (кроме самого sign), ключи отсортированы по алфавиту,
+    # значения склеены как key=value через &.
+    params = {
+        key: value
+        for key, value in data.items()
+        if key != "sign"
+    }
+
+    source = "&".join(
+        f"{key}={params[key]}"
+        for key in sorted(params)
     )
+
+    expected = hmac.new(
+        settings.yoomoney_secret.encode("utf-8"),
+        source.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
     return hmac.compare_digest(
         expected,
-        received_hash,
+        sign,
     )
 
 
