@@ -97,7 +97,8 @@ class PaymentService:
         )
 
         return payment, payment_url
-            async def confirm_payment_by_label(
+
+    async def confirm_payment_by_label(
         self,
         label: str,
     ) -> Payment | None:
