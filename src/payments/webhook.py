@@ -110,12 +110,24 @@ def _is_valid_payload(
     data: dict[str, str],
 ) -> bool:
 
-    return (
-        data.get("notification_type") in ("p2p-incoming", "card-incoming")
-        and data.get("currency") == "643"
-        and data.get("receiver") == settings.yoomoney_wallet
-        and bool(data.get("label"))
-    )
+    if data.get("notification_type") not in ("p2p-incoming", "card-incoming"):
+        return False
+
+    if data.get("currency") != "643":
+        return False
+
+    if not data.get("label"):
+        return False
+
+    # receiver присутствует только при p2p-incoming.
+    # При card-incoming YooMoney это поле не присылает,
+    # поэтому проверяем receiver, только если он есть.
+    receiver = data.get("receiver")
+
+    if receiver and receiver != settings.yoomoney_wallet:
+        return False
+
+    return True
 
 
 # =====================================================
