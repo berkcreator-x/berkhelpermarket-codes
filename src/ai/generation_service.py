@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import re
+import html
+import json
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from src.ai.proxyapi_client import (
     ProxyAPIClient,
@@ -48,19 +50,22 @@ class ProductCard:
     characteristics: list[str] = field(default_factory=list)
 
     def to_message(self) -> str:
+
         advantages = "\n".join(
-            f"• {item}" for item in self.advantages
+            f"• {html.escape(item)}"
+            for item in self.advantages
         )
 
         characteristics = "\n".join(
-            f"• {item}" for item in self.characteristics
+            f"• {html.escape(item)}"
+            for item in self.characteristics
         )
 
         parts = [
-            f"🏷 <b>Название</b>\n{self.title}",
-            f"📝 <b>Описание</b>\n{self.description}",
+            f"🏷 <b>Название</b>\n{html.escape(self.title)}",
+            f"📝 <b>Описание</b>\n{html.escape(self.description)}",
             f"⭐ <b>Преимущества</b>\n{advantages}",
-            f"🔍 <b>SEO</b>\n{self.seo}",
+            f"🔍 <b>SEO</b>\n{html.escape(self.seo)}",
         ]
 
         if self.characteristics:
@@ -72,55 +77,142 @@ class ProductCard:
 
 
 # ==========================================================
-# PARSER
+# JSON PARSER
 # ==========================================================
 
-_SECTION_RE = {
-    "title": r"(?:🏷\s*)?Название\s*(.*?)(?=\n(?:📝|Описание)|\Z)",
-    "description": r"(?:📝\s*)?Описание\s*(.*?)(?=\n(?:⭐|Преимущества)|\Z)",
-    "advantages": r"(?:⭐\s*)?Преимущества\s*(.*?)(?=\n(?:🔍|SEO)|\Z)",
-    "seo": r"(?:🔍\s*)?SEO.*?\s*(.*?)(?=\n(?:📦|Характеристики)|\Z)",
-    "characteristics": r"(?:📦\s*)?Характеристики\s*(.*)",
-}
+def _strip_code_fence(raw: str) -> str:
+
+    text = raw.strip()
+
+    if text.startswith("```"):
+
+        parts = text.split("```")
+
+        if len(parts) >= 2:
+            text = parts[1].strip()
+
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+
+    return text
 
 
-def _parse_list(text: str) -> list[str]:
-    return [
-        item.strip("•-* \t")
-        for item in text.splitlines()
-        if item.strip()
-    ]
+def _extract_json(raw: str) -> str:
+
+    text = _strip_code_fence(raw)
+
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1:
+        return text
+
+    return text[start : end + 1]
 
 
-def _extract(raw: str, key: str) -> str:
-    match = re.search(
-        _SECTION_RE[key],
-        raw,
-        re.DOTALL | re.IGNORECASE,
-    )
+def _normalize_string(value: Any) -> str:
 
-    if match is None:
+    if value is None:
         return ""
 
-    return match.group(1).strip()
+    if isinstance(value, list):
+        return "\n".join(
+            str(x).strip()
+            for x in value
+            if str(x).strip()
+        )
+
+    return str(value).strip()
+
+
+def _normalize_list(value: Any) -> list[str]:
+
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+
+        return [
+            str(x).strip(" -*•\t")
+            for x in value
+            if str(x).strip()
+        ]
+
+    if isinstance(value, str):
+
+        if "," in value and "\n" not in value:
+
+            return [
+                item.strip(" -*•")
+                for item in value.split(",")
+                if item.strip()
+            ]
+
+        return [
+            item.strip(" -*•")
+            for item in value.splitlines()
+            if item.strip()
+        ]
+
+    return [str(value)]
 
 
 def _parse_card(raw: str) -> ProductCard:
-    title = _extract(raw, "title")
-    description = _extract(raw, "description")
-    advantages = _parse_list(
-        _extract(raw, "advantages")
+
+    candidate = _extract_json(raw)
+
+    try:
+
+        payload = json.loads(candidate)
+
+    except Exception as exc:
+
+        logger.warning(
+            "ai_json_decode_failed",
+            preview=raw[:400],
+            error=str(exc),
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid JSON."
+        ) from exc
+
+    if not isinstance(payload, dict):
+
+        raise ProductValidationError(
+            "JSON root must be object."
+        )
+
+    payload = {
+        str(k).lower().strip(): v
+        for k, v in payload.items()
+    }
+
+    title = _normalize_string(
+        payload.get("title")
     )
-    seo = _extract(raw, "seo")
-    characteristics = _parse_list(
-        _extract(raw, "characteristics")
+
+    description = _normalize_string(
+        payload.get("description")
+    )
+
+    advantages = _normalize_list(
+        payload.get("advantages")
+    )
+
+    seo = _normalize_string(
+        payload.get("seo")
+    )
+
+    characteristics = _normalize_list(
+        payload.get("characteristics")
     )
 
     if not title or not description:
 
         logger.warning(
             "ai_invalid_structure",
-            preview=raw[:400],
+            preview=raw[:300],
         )
 
         raise ProductValidationError(
@@ -147,6 +239,7 @@ class GenerationService:
         user_repo: UserRepository,
         client: ProxyAPIClient = proxyapi_client,
     ) -> None:
+
         self._user_repo = user_repo
         self._client = client
 
@@ -187,9 +280,6 @@ class GenerationService:
             GenerationType.IMPROVE,
             prompt,
         )
-    # ======================================================
-    # CORE PIPELINE
-    # ======================================================
 
     async def _run(
         self,
@@ -202,11 +292,8 @@ class GenerationService:
 
         cost = GENERATION_COSTS[gen_type]
 
-        # --------------------------------------------------
-        # 1. Проверка баланса
-        # --------------------------------------------------
-
         if user.generation_balance < cost:
+
             logger.info(
                 "generation_not_enough_balance",
                 user_id=user.id,
@@ -218,87 +305,23 @@ class GenerationService:
                 f"Need {cost}, have {user.generation_balance}"
             )
 
-        # --------------------------------------------------
-        # 2. Генерация AI
-        # --------------------------------------------------
-
-        try:
-            raw = await self._client.generate(prompt)
-
-        except ProxyAPIError as exc:
-
-            logger.error(
-                "proxyapi_generation_failed",
-                user_id=user.id,
-                generation_type=gen_type.value,
-                prompt_length=len(prompt),
-                error=str(exc),
-            )
-
-            raise AIServiceError(
-                "AI temporarily unavailable."
-            ) from exc
-
-        # --------------------------------------------------
-        # 3. Проверка пустого ответа
-        # --------------------------------------------------
-
-        if not raw or not raw.strip():
-
-            logger.error(
-                "proxyapi_empty_response",
-                user_id=user.id,
-                generation_type=gen_type.value,
-            )
-
-            raise AIServiceError(
-                "AI returned empty response."
-            )
-
-        # --------------------------------------------------
-        # 4. Парсинг
-        # --------------------------------------------------
-
-        try:
-            card = _parse_card(raw)
-
-        except ProductValidationError:
-
-            logger.error(
-                "generation_invalid_ai_response",
-                user_id=user.id,
-                generation_type=gen_type.value,
-                preview=raw[:600],
-            )
-
-            raise
-
-        # --------------------------------------------------
-        # 5. Атомарное списание генераций
-        # --------------------------------------------------
+        card = await self._generate_card(
+            user,
+            gen_type,
+            prompt,
+        )
 
         await self._user_repo.deduct_generations_safe(
             user=user,
             amount=cost,
         )
-
-        # --------------------------------------------------
-        # 6. Лог генерации
-        # --------------------------------------------------
-
         await self._user_repo.log_generation(
             user=user,
             gen_type=gen_type,
         )
-
-        # --------------------------------------------------
-        # 7. Финальный лог
-        # --------------------------------------------------
-
         duration_ms = int(
             (time.perf_counter() - started_at) * 1000
         )
-
         logger.info(
             "generation_completed",
             user_id=user.id,
@@ -308,5 +331,84 @@ class GenerationService:
             duration_ms=duration_ms,
             prompt_length=len(prompt),
         )
-
         return card
+
+    async def _generate_card(
+        self,
+        user: User,
+        gen_type: GenerationType,
+        prompt: str,
+    ) -> ProductCard:
+        last_raw = ""
+        for attempt in (1, 2):
+            raw = await self._call_ai(
+                user,
+                gen_type,
+                prompt,
+                attempt,
+            )
+            last_raw = raw
+            try:
+                return _parse_card(raw)
+            except ProductValidationError:
+                if attempt == 2:
+                    logger.error(
+                        "generation_invalid_ai_response",
+                        user_id=user.id,
+                        generation_type=gen_type.value,
+                        preview=last_raw[:600],
+                    )
+                    raise
+                logger.warning(
+                    "generation_retry_invalid_json",
+                    user_id=user.id,
+                    generation_type=gen_type.value,
+                )
+        raise ProductValidationError(
+            "AI returned invalid response."
+        )
+
+    async def _call_ai(
+        self,
+        user: User,
+        gen_type: GenerationType,
+        prompt: str,
+        attempt: int,
+    ) -> str:
+        request_prompt = prompt
+        if attempt == 2:
+            request_prompt = (
+                f"{prompt}\n\n"
+                "ВАЖНО.\n"
+                "Предыдущий ответ оказался невалидным.\n"
+                "Верни ТОЛЬКО корректный JSON.\n"
+                "Без markdown.\n"
+                "Без ```.\n"
+                "Без текста до JSON.\n"
+                "Без текста после JSON."
+            )
+        try:
+            raw = await self._client.generate(
+                request_prompt
+            )
+        except ProxyAPIError as exc:
+            logger.error(
+                "proxyapi_generation_failed",
+                user_id=user.id,
+                generation_type=gen_type.value,
+                prompt_length=len(request_prompt),
+                error=str(exc),
+            )
+            raise AIServiceError(
+                "AI temporarily unavailable."
+            ) from exc
+        if not raw.strip():
+            logger.error(
+                "proxyapi_empty_response",
+                user_id=user.id,
+                generation_type=gen_type.value,
+            )
+            raise AIServiceError(
+                "AI returned empty response."
+            )
+        return raw
