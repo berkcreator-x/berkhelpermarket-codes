@@ -9,6 +9,7 @@ from src.ai import (
     AIServiceError,
     GenerationService,
     InsufficientBalanceError,
+    ProductValidationError,
 )
 from src.config import settings
 from src.handlers.states import ImproveProductStates
@@ -111,6 +112,23 @@ async def process_improve_text(
                 is_admin=is_admin,
             ),
         )
+        return
+
+    except ProductValidationError:
+
+        logger.warning(
+            "improve_product_validation_failed",
+            user_id=user.id,
+        )
+
+        await message.answer(
+            "⚠️ Не удалось обработать ответ нейросети.\n\n"
+            "Попробуйте ещё раз.",
+            reply_markup=main_menu_keyboard(
+                is_admin=is_admin,
+            ),
+        )
+
         return
 
     except AIServiceError:
