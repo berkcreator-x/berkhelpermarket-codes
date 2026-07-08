@@ -95,168 +95,50 @@ class ProxyAPIClient:
 
         body = self._build_body(user_prompt)
 
-        last_exc: ProxyAPIError | None = None
+        try:
 
-        for attempt in range(1, _MAX_RETRIES + 1):
-
-            started = time.perf_counter()
-
-            try:
-
-                response = await _get_http_client().post(
-                    url,
-                    headers=self._headers(),
-                    json=body,
-                )
-
-            except httpx.TimeoutException as exc:
-
-                logger.warning(
-                    "proxyapi_timeout",
-                    attempt=attempt,
-                    error=str(exc),
-                )
-
-                last_exc = ProxyAPIError(
-                    "AI timeout."
-                )
-
-                await self._backoff(attempt)
-
-                continue
-
-            except httpx.RequestError as exc:
-
-                logger.warning(
-                    "proxyapi_network_error",
-                    attempt=attempt,
-                    error=str(exc),
-                )
-
-                last_exc = ProxyAPIError(
-                    "Network error."
-                )
-
-                await self._backoff(attempt)
-
-                continue
-
-            duration_ms = int(
-                (time.perf_counter() - started) * 1000
+            response = await _get_http_client().post(
+                url,
+                headers=self._headers(),
+                json=body,
             )
 
-            if response.status_code in _NO_RETRY_STATUSES:
+        except Exception as exc:
 
-                logger.error(
-                    "proxyapi_client_error",
-                    status=response.status_code,
-                    attempt=attempt,
-                )
+            raise ProxyAPIError(
+                "AI unavailable."
+            ) from exc
 
-                raise ProxyAPIError(
-                    f"HTTP {response.status_code}",
-                    status_code=response.status_code,
-                )
+        if response.status_code != 200:
 
-            if response.status_code == 429:
-
-                logger.warning(
-                    "proxyapi_rate_limit",
-                    attempt=attempt,
-                )
-
-                last_exc = ProxyAPIError(
-                    "Rate limit exceeded.",
-                    status_code=429,
-                )
-
-                await self._backoff(attempt)
-
-                continue
-
-            if response.status_code != 200:
-
-                logger.warning(
-                    "proxyapi_server_error",
-                    status=response.status_code,
-                    attempt=attempt,
-                    preview=response.text[:300],
-                )
-
-                last_exc = ProxyAPIError(
-                    f"HTTP {response.status_code}",
-                    status_code=response.status_code,
-                )
-
-                await self._backoff(attempt)
-
-                continue
-
-            try:
-
-                payload = response.json()
-
-                choices = payload.get("choices")
-
-                if not choices:
-                    raise ValueError("Empty choices")
-
-                message = choices[0].get("message")
-
-                if not message:
-                    raise ValueError("Missing message")
-
-                content = message.get("content", "").strip()
-
-            except Exception as exc:
-
-                logger.error(
-                    "proxyapi_invalid_response",
-                    preview=response.text[:500],
-                )
-
-                raise ProxyAPIError(
-                    "Invalid AI response."
-                ) from exc
-
-            if not content:
-
-                logger.error(
-                    "proxyapi_empty_content",
-                )
-
-                raise ProxyAPIError(
-                    "AI returned empty content."
-                )
-
-            logger.info(
-                "proxyapi_success",
-                model=settings.ai_model,
-                duration_ms=duration_ms,
-                prompt_length=len(user_prompt),
-                response_length=len(content),
-                tokens=payload.get("usage", {}).get("total_tokens"),
+            logger.error(
+                "proxyapi_failed",
+                status=response.status_code,
+                body=response.text[:400],
             )
 
-            return content
+            raise ProxyAPIError(
+                f"HTTP {response.status_code}"
+            )
 
-        logger.error(
-            "proxyapi_all_retries_failed",
-            retries=_MAX_RETRIES,
-        )
+        payload = response.json()
 
-        raise last_exc or ProxyAPIError(
-            "AI unavailable."
-        )
+        try:
 
-    @staticmethod
-    async def _backoff(
-        attempt: int,
-    ) -> None:
+            content = payload["choices"][0]["message"]["content"]
 
-        delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        except Exception as exc:
 
-        await asyncio.sleep(delay)
+            logger.error(
+                "proxyapi_invalid_response",
+                body=str(payload)[:600],
+            )
+
+            raise ProxyAPIError(
+                "Invalid response."
+            ) from exc
+
+        return content.strip()
 
 
 proxyapi_client = ProxyAPIClient()
