@@ -19,13 +19,17 @@ _TIMEOUT = httpx.Timeout(
 )
 
 _MAX_RETRIES = 3
-_RETRY_BASE_DELAY = 1.0
+_RETRY_BASE_DELAY = 1.5
 
-_NO_RETRY_STATUSES = {400, 401, 403}
+_NO_RETRY_STATUSES = {
+    400,
+    401,
+    403,
+}
 
 
 class ProxyAPIError(Exception):
-    """Typed exception for all ProxyAPI failures."""
+    """Typed exception for ProxyAPI."""
 
     def __init__(
         self,
@@ -73,8 +77,8 @@ class ProxyAPIClient:
                     "content": user_prompt,
                 },
             ],
-            "temperature": 0.7,
-            "max_tokens": 1500,
+            "temperature": 0.55,
+            "max_tokens": 1300,
             "response_format": {
                 "type": "json_object"
             },
@@ -86,7 +90,9 @@ class ProxyAPIClient:
     ) -> str:
 
         if not settings.proxyapi_api_key:
-            raise ProxyAPIError("ProxyAPI API key is not configured.")
+            raise ProxyAPIError(
+                "ProxyAPI API key is not configured."
+            )
 
         url = (
             f"{settings.proxyapi_base_url.rstrip('/')}"
@@ -95,33 +101,95 @@ class ProxyAPIClient:
 
         body = self._build_body(user_prompt)
 
-        try:
+        last_error: Exception | None = None
 
-            response = await _get_http_client().post(
-                url,
-                headers=self._headers(),
-                json=body,
+        for attempt in range(1, _MAX_RETRIES + 1):
+
+            started = time.perf_counter()
+
+            try:
+
+                response = await _get_http_client().post(
+                    url,
+                    headers=self._headers(),
+                    json=body,
+                )
+
+            except Exception as exc:
+
+                last_error = exc
+
+                logger.warning(
+                    "proxyapi_network_error",
+                    attempt=attempt,
+                    error=str(exc),
+                )
+
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(
+                        _RETRY_BASE_DELAY * attempt
+                    )
+                    continue
+
+                raise ProxyAPIError(
+                    "AI unavailable."
+                ) from exc
+
+            elapsed = round(
+                time.perf_counter() - started,
+                2,
             )
 
-        except Exception as exc:
+            logger.info(
+                "proxyapi_response",
+                status=response.status_code,
+                seconds=elapsed,
+            )
 
-            raise ProxyAPIError(
-                "AI unavailable."
-            ) from exc
-
-        if response.status_code != 200:
+            if response.status_code == 200:
+                break
 
             logger.error(
                 "proxyapi_failed",
                 status=response.status_code,
+                attempt=attempt,
                 body=response.text[:400],
             )
 
+            if response.status_code in _NO_RETRY_STATUSES:
+
+                raise ProxyAPIError(
+                    f"HTTP {response.status_code}",
+                    response.status_code,
+                )
+
+            if attempt < _MAX_RETRIES:
+
+                await asyncio.sleep(
+                    _RETRY_BASE_DELAY * attempt
+                )
+
+                continue
+
             raise ProxyAPIError(
-                f"HTTP {response.status_code}"
+                f"HTTP {response.status_code}",
+                response.status_code,
             )
 
-        payload = response.json()
+        try:
+
+            payload = response.json()
+
+        except Exception as exc:
+
+            logger.error(
+                "proxyapi_invalid_json",
+                body=response.text[:500],
+            )
+
+            raise ProxyAPIError(
+                "Invalid JSON."
+            ) from exc
 
         try:
 
@@ -138,7 +206,21 @@ class ProxyAPIClient:
                 "Invalid response."
             ) from exc
 
-        return content.strip()
+        if not content:
+
+            raise ProxyAPIError(
+                "Empty AI response."
+            )
+
+        content = content.strip()
+
+        if not content:
+
+            raise ProxyAPIError(
+                "Empty AI response."
+            )
+
+        return content
 
 
 proxyapi_client = ProxyAPIClient()
