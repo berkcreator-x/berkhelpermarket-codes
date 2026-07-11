@@ -1,6 +1,6 @@
 from aiogram import Router
 
-from src.handlers import admin, common, generations, improve_product, new_product, profile
+from src.handlers import admin, common, generations, history, improve_product, new_product, profile
 
 
 def get_main_router() -> Router:
@@ -12,6 +12,7 @@ def get_main_router() -> Router:
     router.include_router(improve_product.router)
     router.include_router(profile.router)
     router.include_router(generations.router)
+    router.include_router(history.router)
     return router
 
 
