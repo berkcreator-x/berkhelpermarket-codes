@@ -188,6 +188,7 @@ class UserRepository:
         self,
         user: User,
         gen_type: GenerationType,
+        product_title: str | None = None,
         cost: int = 1,
         quality_score: int | None = None,
         duration_ms: int | None = None,
@@ -198,6 +199,7 @@ class UserRepository:
         log = GenerationLog(
             user_id=user.id,
             type=gen_type,
+            product_title=product_title,
             cost=cost,
             quality_score=quality_score,
             duration_ms=duration_ms,
@@ -214,6 +216,7 @@ class UserRepository:
             "generation_logged",
             user_id=user.id,
             generation_type=gen_type.value,
+            product_title=product_title,
             cost=cost,
             quality_score=quality_score,
             duration_ms=duration_ms,
@@ -245,3 +248,20 @@ class UserRepository:
         result = await self._session.execute(stmt)
 
         return int(result.scalar_one())
+
+    async def get_recent_generations(
+        self,
+        user: User,
+        limit: int = 10,
+    ) -> list[GenerationLog]:
+
+        stmt = (
+            select(GenerationLog)
+            .where(GenerationLog.user_id == user.id)
+            .order_by(GenerationLog.created_at.desc())
+            .limit(limit)
+        )
+
+        result = await self._session.execute(stmt)
+
+        return list(result.scalars().all())
