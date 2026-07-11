@@ -23,6 +23,9 @@ def main_menu_keyboard(
             KeyboardButton(text="👤 Профиль"),
             KeyboardButton(text="💳 Генерации"),
         ],
+        [
+            KeyboardButton(text="📜 История генераций"),
+        ],
     ]
 
     if is_admin:
