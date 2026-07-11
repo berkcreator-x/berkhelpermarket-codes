@@ -447,13 +447,19 @@ class GenerationService:
             user=user,
             amount=cost,
         )
-        await self._user_repo.log_generation(
-            user=user,
-            gen_type=gen_type,
-        )
+
         duration_ms = int(
             (time.perf_counter() - started_at) * 1000
         )
+
+        await self._user_repo.log_generation(
+            user=user,
+            gen_type=gen_type,
+            cost=cost,
+            quality_score=quality,
+            duration_ms=duration_ms,
+        )
+
         logger.info(
             "generation_completed",
             user_id=user.id,
