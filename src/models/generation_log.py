@@ -54,6 +54,12 @@ class GenerationLog(Base):
     )
 
 
+    product_title: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+
     cost: Mapped[int] = mapped_column(
         Integer,
         default=1,
