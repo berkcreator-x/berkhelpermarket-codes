@@ -188,16 +188,38 @@ class UserRepository:
         self,
         user: User,
         gen_type: GenerationType,
+        cost: int = 1,
+        quality_score: int | None = None,
+        duration_ms: int | None = None,
+        status: str = "success",
     ) -> GenerationLog:
+
 
         log = GenerationLog(
             user_id=user.id,
             type=gen_type,
+            cost=cost,
+            quality_score=quality_score,
+            duration_ms=duration_ms,
+            status=status,
         )
+
 
         self._session.add(log)
 
         await self._session.flush()
+
+
+        logger.info(
+            "generation_logged",
+            user_id=user.id,
+            generation_type=gen_type.value,
+            cost=cost,
+            quality_score=quality_score,
+            duration_ms=duration_ms,
+            status=status,
+        )
+
 
         return log
 
