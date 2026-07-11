@@ -38,6 +38,23 @@ GENERATION_COSTS: dict[GenerationType, int] = {
 
 
 # ==========================================================
+# AI VALIDATION
+# ==========================================================
+
+MAX_AI_ATTEMPTS = 2
+
+MIN_TITLE_LENGTH = 20
+MAX_TITLE_LENGTH = 80
+MIN_DESCRIPTION_LENGTH = 200
+
+MIN_ADVANTAGES = 5
+MIN_CHARACTERISTICS = 3
+MIN_SEO_KEYWORDS = 10
+
+QUALITY_SCORE_TO_ACCEPT = 70
+
+
+# ==========================================================
 # PRODUCT CARD
 # ==========================================================
 
@@ -122,7 +139,11 @@ def _normalize_string(value: Any) -> str:
             if str(x).strip()
         )
 
-    return str(value).strip()
+    return (
+        str(value)
+        .replace("\r", "")
+        .strip()
+    )
 
 
 def _normalize_list(value: Any) -> list[str]:
@@ -154,7 +175,110 @@ def _normalize_list(value: Any) -> list[str]:
             if item.strip()
         ]
 
-    return [str(value)]
+    return [
+        str(value).strip(" -*•\t")
+    ]
+
+
+def _count_seo_keywords(seo: str) -> int:
+
+    if not seo:
+        return 0
+
+    return len(
+        [
+            item.strip()
+            for item in seo.replace("\n", ",").split(",")
+            if item.strip()
+        ]
+    )
+
+
+def _calculate_quality_score(
+    card: ProductCard,
+) -> int:
+
+    score = 0
+
+    # TITLE
+
+    if len(card.title) >= MIN_TITLE_LENGTH:
+        score += 20
+
+    # DESCRIPTION
+
+    if len(card.description) >= MIN_DESCRIPTION_LENGTH:
+        score += 30
+
+    # ADVANTAGES
+
+    if len(card.advantages) >= MIN_ADVANTAGES:
+        score += 20
+
+    # SEO
+
+    if (
+        _count_seo_keywords(card.seo)
+        >= MIN_SEO_KEYWORDS
+    ):
+        score += 20
+
+    # CHARACTERISTICS
+
+    if (
+        len(card.characteristics)
+        >= MIN_CHARACTERISTICS
+    ):
+        score += 10
+
+    return score
+
+
+def _validate_card(
+    card: ProductCard,
+) -> None:
+
+    if len(card.title) < MIN_TITLE_LENGTH:
+
+        raise ProductValidationError(
+            "Title too short."
+        )
+
+    if len(card.title) > MAX_TITLE_LENGTH:
+
+        raise ProductValidationError(
+            "Title too long."
+        )
+
+    if len(card.description) < MIN_DESCRIPTION_LENGTH:
+
+        raise ProductValidationError(
+            "Description too short."
+        )
+
+    if len(card.advantages) < MIN_ADVANTAGES:
+
+        raise ProductValidationError(
+            "Too few advantages."
+        )
+
+    if (
+        _count_seo_keywords(card.seo)
+        < MIN_SEO_KEYWORDS
+    ):
+
+        raise ProductValidationError(
+            "Too few SEO keywords."
+        )
+
+    if (
+        len(card.characteristics)
+        < MIN_CHARACTERISTICS
+    ):
+
+        raise ProductValidationError(
+            "Too few characteristics."
+        )
 
 
 def _parse_card(raw: str) -> ProductCard:
@@ -188,6 +312,12 @@ def _parse_card(raw: str) -> ProductCard:
         for k, v in payload.items()
     }
 
+    payload = {
+        k: v
+        for k, v in payload.items()
+        if v is not None
+    }
+
     title = _normalize_string(
         payload.get("title")
     )
@@ -219,13 +349,15 @@ def _parse_card(raw: str) -> ProductCard:
             "AI returned invalid response."
         )
 
-    return ProductCard(
+    card = ProductCard(
         title=title,
         description=description,
         advantages=advantages,
         seo=seo,
         characteristics=characteristics,
     )
+
+    return card
 
 
 # ==========================================================
@@ -305,7 +437,7 @@ class GenerationService:
                 f"Need {cost}, have {user.generation_balance}"
             )
 
-        card = await self._generate_card(
+        card, quality = await self._generate_card(
             user,
             gen_type,
             prompt,
@@ -330,6 +462,7 @@ class GenerationService:
             balance=user.generation_balance,
             duration_ms=duration_ms,
             prompt_length=len(prompt),
+            quality=quality,
         )
         return card
 
@@ -338,32 +471,91 @@ class GenerationService:
         user: User,
         gen_type: GenerationType,
         prompt: str,
-    ) -> ProductCard:
+    ) -> tuple[ProductCard, int]:
+
         last_raw = ""
-        for attempt in (1, 2):
+        last_reason = ""
+
+        for attempt in range(
+            1,
+            MAX_AI_ATTEMPTS + 1,
+        ):
+
             raw = await self._call_ai(
                 user,
                 gen_type,
                 prompt,
                 attempt,
+                last_reason,
             )
+
             last_raw = raw
+
             try:
-                return _parse_card(raw)
-            except ProductValidationError:
-                if attempt == 2:
+
+                card = _parse_card(raw)
+
+                _validate_card(card)
+
+                quality = _calculate_quality_score(
+                    card
+                )
+
+                logger.info(
+                    "generation_quality",
+                    user_id=user.id,
+                    generation_type=gen_type.value,
+                    quality=quality,
+                )
+
+                if (
+                    quality
+                    < QUALITY_SCORE_TO_ACCEPT
+                ):
+
+                    logger.warning(
+                        "generation_quality_retry",
+                        user_id=user.id,
+                        quality=quality,
+                    )
+
+                    if attempt < MAX_AI_ATTEMPTS:
+                        last_reason = (
+                            "Low quality score "
+                            f"({quality}/{QUALITY_SCORE_TO_ACCEPT})."
+                        )
+                        continue
+
+                return card, quality
+
+            except ProductValidationError as exc:
+
+                last_reason = str(exc)
+
+                logger.warning(
+                    "generation_validation_failed",
+                    user_id=user.id,
+                    generation_type=gen_type.value,
+                    reason=str(exc),
+                )
+
+                if attempt == MAX_AI_ATTEMPTS:
+
                     logger.error(
                         "generation_invalid_ai_response",
                         user_id=user.id,
                         generation_type=gen_type.value,
                         preview=last_raw[:600],
                     )
+
                     raise
+
                 logger.warning(
                     "generation_retry_invalid_json",
                     user_id=user.id,
                     generation_type=gen_type.value,
                 )
+
         raise ProductValidationError(
             "AI returned invalid response."
         )
@@ -374,22 +566,45 @@ class GenerationService:
         gen_type: GenerationType,
         prompt: str,
         attempt: int,
+        reason: str = "",
     ) -> str:
         request_prompt = prompt
-        if attempt == 2:
+        if attempt > 1:
+
+            reason_text = (
+                reason
+                or "недостаточное качество либо неверный JSON"
+            )
+
             request_prompt = (
                 f"{prompt}\n\n"
-                "ВАЖНО.\n"
-                "Предыдущий ответ оказался невалидным.\n"
-                "Верни ТОЛЬКО корректный JSON.\n"
-                "Без markdown.\n"
-                "Без ```.\n"
-                "Без текста до JSON.\n"
-                "Без текста после JSON."
+                "ПРЕДЫДУЩИЙ ОТВЕТ БЫЛ ОТКЛОНЕН.\n\n"
+                f"Причина: {reason_text}\n\n"
+                "Исправь ответ.\n\n"
+                "Строго соблюдай формат.\n\n"
+                "Ответ должен:\n"
+                "- начинаться с {\n"
+                "- заканчиваться }\n"
+                "- не содержать markdown\n"
+                "- не содержать комментариев\n"
+                "- не содержать пояснений\n"
+                "- не содержать ```\n"
+                "- не содержать текста вне JSON\n"
             )
         try:
             raw = await self._client.generate(
                 request_prompt
+            )
+            raw = raw.strip()
+            logger.info(
+                "ai_response_length",
+                user_id=user.id,
+                generation_type=gen_type.value,
+                length=len(raw),
+            )
+            logger.debug(
+                "ai_preview",
+                preview=raw[:200],
             )
         except ProxyAPIError as exc:
             logger.error(
@@ -402,7 +617,7 @@ class GenerationService:
             raise AIServiceError(
                 "AI temporarily unavailable."
             ) from exc
-        if not raw.strip():
+        if not raw:
             logger.error(
                 "proxyapi_empty_response",
                 user_id=user.id,
