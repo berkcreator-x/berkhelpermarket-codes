@@ -455,6 +455,7 @@ class GenerationService:
         await self._user_repo.log_generation(
             user=user,
             gen_type=gen_type,
+            product_title=card.title,
             cost=cost,
             quality_score=quality,
             duration_ms=duration_ms,
