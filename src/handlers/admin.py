@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import func, select
@@ -83,7 +84,12 @@ async def admin_stats(callback: CallbackQuery, session: AsyncSession) -> None:
         f"💰 Общая сумма: {float(total_paid_amount):.2f}₽"
     )
 
-    await callback.message.edit_text(text, reply_markup=admin_panel_keyboard())  # type: ignore[union-attr]
+    try:
+        await callback.message.edit_text(text, reply_markup=admin_panel_keyboard())  # type: ignore[union-attr]
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
+
     await callback.answer()
 
 
