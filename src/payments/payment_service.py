@@ -59,6 +59,7 @@ class PaymentService:
         self,
         user: User,
         package: GenerationPackage,
+        source: str = "yoomoney",
     ) -> tuple[Payment, str]:
         """
         Создание нового платежа.
@@ -78,6 +79,7 @@ class PaymentService:
             generations=package.generations,
             payment_id=label,
             label=label,
+            source=source,
         )
 
         payment_url = yoomoney_client.build_payment_url(
@@ -90,10 +92,12 @@ class PaymentService:
         logger.info(
             "payment_created",
             payment_id=payment.id,
+            order_number=payment.order_number,
             user_id=user.id,
             label=label,
             amount=package.price_rub,
             generations=package.generations,
+            source=source,
         )
 
         return payment, payment_url
@@ -101,6 +105,7 @@ class PaymentService:
     async def confirm_payment_by_label(
         self,
         label: str,
+        provider_transaction_id: str | None = None,
     ) -> Payment | None:
         """
         Подтверждение платежа.
@@ -160,6 +165,7 @@ class PaymentService:
 
             await self._payment_repo.mark_paid(
                 payment,
+                provider_transaction_id=provider_transaction_id,
             )
 
             await self._user_repo.add_generations(
@@ -172,10 +178,12 @@ class PaymentService:
             logger.info(
                 "payment_confirmed",
                 payment_id=payment.id,
+                order_number=payment.order_number,
                 label=label,
                 user_id=user.id,
                 generations=payment.generations,
                 balance=user.generation_balance,
+                provider_transaction_id=provider_transaction_id,
             )
 
             return payment
