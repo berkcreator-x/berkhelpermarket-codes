@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     String,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,12 +34,23 @@ class Payment(Base):
         Index("ix_payments_payment_id", "payment_id"),
         Index("ix_payments_status", "status"),
         Index("ix_payments_user_id", "user_id"),
+        Index("ix_payments_order_number", "order_number"),
     )
 
     id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True,
         autoincrement=True,
+    )
+
+    # Человекочитаемый номер заказа для отображения
+    # пользователю ("Заказ №1042"). Заполняется БД
+    # через последовательность payment_order_seq.
+    order_number: Mapped[int] = mapped_column(
+        Integer,
+        unique=True,
+        nullable=False,
+        server_default=text("nextval('payment_order_seq')"),
     )
 
     user_id: Mapped[int] = mapped_column(
@@ -81,6 +93,32 @@ class Payment(Base):
         nullable=False,
     )
 
+    # Источник/провайдер оплаты. Сейчас всегда "yoomoney",
+    # но поле готово под добавление новых платёжных систем
+    # (СБП, карта напрямую, крипта и т.д.) без миграции схемы.
+    source: Mapped[str] = mapped_column(
+        String(50),
+        default="yoomoney",
+        server_default="yoomoney",
+        nullable=False,
+    )
+
+    # Номер операции в системе платёжного провайдера
+    # (у YooMoney это operation_id из вебхука). Не совпадает
+    # с нашим внутренним label/payment_id — нужен для сверки
+    # с личным кабинетом провайдера при спорных ситуациях.
+    provider_transaction_id: Mapped[str | None] = mapped_column(
+        String(STRING_LENGTH),
+        nullable=True,
+    )
+
+    # Момент фактического подтверждения оплаты
+    # (в отличие от created_at — момента создания ссылки).
+    paid_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -103,6 +141,7 @@ class Payment(Base):
         return (
             f"<Payment("
             f"id={self.id}, "
+            f"order_number={self.order_number}, "
             f"user_id={self.user_id}, "
             f"status={self.status.value}, "
             f"amount={self.amount}, "
@@ -114,6 +153,7 @@ class Payment(Base):
         return (
             f"Payment("
             f"id={self.id}, "
+            f"order_number={self.order_number}, "
             f"status={self.status.value}, "
             f"label={self.label}"
             f")"
