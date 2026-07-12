@@ -44,6 +44,12 @@ def profile_nav_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
+                    text="📊 Моя статистика",
+                    callback_data="profile_nav:stats",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="📜 История генераций",
                     callback_data="profile_nav:history",
                 ),
