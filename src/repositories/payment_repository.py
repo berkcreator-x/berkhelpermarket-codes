@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -34,6 +35,7 @@ class PaymentRepository:
         generations: int,
         payment_id: str,
         label: str,
+        source: str = "yoomoney",
     ) -> Payment:
         payment = Payment(
             user_id=user.id,
@@ -42,6 +44,7 @@ class PaymentRepository:
             payment_id=payment_id,
             label=label,
             status=PaymentStatus.PENDING,
+            source=source,
         )
 
         self._session.add(payment)
@@ -90,6 +93,20 @@ class PaymentRepository:
 
         return result.scalar_one_or_none()
 
+    async def get_by_order_number(
+        self,
+        order_number: int,
+    ) -> Payment | None:
+        stmt = (
+            select(Payment)
+            .options(selectinload(Payment.user))
+            .where(Payment.order_number == order_number)
+        )
+
+        result = await self._session.execute(stmt)
+
+        return result.scalar_one_or_none()
+
     async def get_with_user(
         self,
         label: str,
@@ -121,8 +138,14 @@ class PaymentRepository:
     async def mark_paid(
         self,
         payment: Payment,
+        provider_transaction_id: str | None = None,
     ) -> Payment:
         payment.status = PaymentStatus.PAID
+        payment.paid_at = datetime.datetime.now(
+            datetime.timezone.utc
+        )
+        if provider_transaction_id is not None:
+            payment.provider_transaction_id = provider_transaction_id
         await self._session.flush()
         return payment
 
@@ -176,3 +199,52 @@ class PaymentRepository:
         result = await self._session.execute(stmt)
 
         return list(result.scalars().all())
+
+    async def list_canceled(
+        self,
+        limit: int = 100,
+    ) -> list[Payment]:
+        stmt = (
+            select(Payment)
+            .options(selectinload(Payment.user))
+            .where(Payment.status == PaymentStatus.CANCELED)
+            .order_by(Payment.updated_at.desc())
+            .limit(limit)
+        )
+
+        result = await self._session.execute(stmt)
+
+        return list(result.scalars().all())
+
+    async def expire_pending(
+        self,
+        older_than: datetime.datetime,
+        limit: int = 500,
+    ) -> list[Payment]:
+        """
+        Отменяет все платежи в статусе PENDING,
+        созданные раньше `older_than`.
+
+        Используется фоновым воркером (`expiry_worker.py`)
+        для авто-отмены ссылок на оплату через 24 часа.
+        """
+
+        stmt = (
+            select(Payment)
+            .where(Payment.status == PaymentStatus.PENDING)
+            .where(Payment.created_at < older_than)
+            .with_for_update(skip_locked=True)
+            .limit(limit)
+        )
+
+        result = await self._session.execute(stmt)
+
+        expired = list(result.scalars().all())
+
+        for payment in expired:
+            payment.status = PaymentStatus.CANCELED
+
+        if expired:
+            await self._session.flush()
+
+        return expired
