@@ -1,17 +1,55 @@
 from __future__ import annotations
 
+import datetime
+from decimal import Decimal
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.keyboards import profile_nav_keyboard
-from src.models import GenerationType, User
-from src.repositories import UserRepository
+from src.models import GenerationType, Payment, PaymentStatus, User
+from src.payments import GENERATION_PACKAGES
+from src.repositories import PaymentRepository, UserRepository
 
 router = Router(name="profile")
 
 HISTORY_LIMIT = 10
+PURCHASES_LIMIT = 10
+
+_RU_MONTHS = {
+    1: "янв", 2: "фев", 3: "мар", 4: "апр",
+    5: "май", 6: "июн", 7: "июл", 8: "авг",
+    9: "сен", 10: "окт", 11: "ноя", 12: "дек",
+}
+
+_STATUS_ICON = {
+    PaymentStatus.PAID: "✅",
+    PaymentStatus.PENDING: "⏳",
+    PaymentStatus.FAILED: "❌",
+    PaymentStatus.CANCELED: "❌",
+}
+
+_STATUS_SUFFIX = {
+    PaymentStatus.PAID: "",
+    PaymentStatus.PENDING: " (ожидает оплаты)",
+    PaymentStatus.FAILED: " (не прошёл)",
+    PaymentStatus.CANCELED: " (отменён)",
+}
+
+
+def _format_date(dt: datetime.datetime) -> str:
+    return f"{dt.day} {_RU_MONTHS[dt.month]}"
+
+
+def _package_title(payment: Payment) -> str:
+
+    for package in GENERATION_PACKAGES.values():
+        if package.generations == payment.generations:
+            return package.title
+
+    return f"{payment.generations} ген."
 
 
 async def _build_profile_text(
@@ -85,13 +123,59 @@ async def _build_history_text(
     )
 
 
-def _build_purchases_text() -> str:
+async def _build_purchases_text(
+    payment_repo: PaymentRepository,
+    user: User,
+) -> str:
+
+    payments = await payment_repo.list_for_user(
+        user,
+        limit=PURCHASES_LIMIT,
+    )
+
+    if not payments:
+        return (
+            "🛒 <b>История покупок</b>\n\n"
+            "У вас пока нет ни одной покупки.\n\n"
+            "Загляните в «💳 Генерации», чтобы выбрать пакет."
+        )
+
+    paid_payments = [
+        p for p in payments if p.status == PaymentStatus.PAID
+    ]
+
+    total_spent = sum(
+        (p.amount for p in paid_payments),
+        Decimal("0"),
+    )
+
+    total_generations = sum(
+        p.generations for p in paid_payments
+    )
+
+    lines = [
+        f"💰 Всего потрачено: <b>{total_spent:.0f}₽</b>",
+        f"📦 Куплено генераций: <b>{total_generations}</b>",
+        "",
+        "━━━━━━━━━━━━━━",
+        "",
+    ]
+
+    for payment in payments:
+        icon = _STATUS_ICON[payment.status]
+        suffix = _STATUS_SUFFIX[payment.status]
+        title = _package_title(payment)
+        date = _format_date(payment.created_at)
+
+        lines.append(
+            f"{icon} {date} — {title} "
+            f"({payment.generations} ген.) — "
+            f"{payment.amount:.0f}₽{suffix}"
+        )
 
     return (
         "🛒 <b>История покупок</b>\n\n"
-        "Эта функция скоро появится!\n\n"
-        "Здесь будет отображаться история пополнений "
-        "баланса генераций и оплаченных тарифов."
+        + "\n".join(lines)
     )
 
 
@@ -129,6 +213,7 @@ async def profile_navigate(
     view = callback.data.split(":", 1)[1]
 
     user_repo = UserRepository(session)
+    payment_repo = PaymentRepository(session)
 
     user = await user_repo.get_or_create(
         telegram_id=callback.from_user.id,
@@ -138,7 +223,7 @@ async def profile_navigate(
     if view == "history":
         text = await _build_history_text(user_repo, user)
     elif view == "purchases":
-        text = _build_purchases_text()
+        text = await _build_purchases_text(payment_repo, user)
     else:
         text = await _build_profile_text(user_repo, user)
 
