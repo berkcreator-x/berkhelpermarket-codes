@@ -23,9 +23,6 @@ def main_menu_keyboard(
             KeyboardButton(text="👤 Профиль"),
             KeyboardButton(text="💳 Генерации"),
         ],
-        [
-            KeyboardButton(text="📜 История генераций"),
-        ],
     ]
 
     if is_admin:
@@ -38,6 +35,32 @@ def main_menu_keyboard(
     return ReplyKeyboardMarkup(
         keyboard=rows,
         resize_keyboard=True,
+    )
+
+
+def profile_nav_keyboard() -> InlineKeyboardMarkup:
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📜 История генераций",
+                    callback_data="profile_nav:history",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🛒 История покупок",
+                    callback_data="profile_nav:purchases",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👤 Профиль",
+                    callback_data="profile_nav:profile",
+                ),
+            ],
+        ]
     )
 
 
