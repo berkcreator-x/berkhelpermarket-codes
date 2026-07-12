@@ -175,10 +175,17 @@ async def _build_purchases_text(
         icon = _STATUS_ICON[payment.status]
         suffix = _STATUS_SUFFIX[payment.status]
         title = _package_title(payment)
-        date = _format_date(payment.created_at)
+
+        if payment.status == PaymentStatus.PAID and payment.paid_at:
+            date = (
+                f"{_format_date(payment.paid_at)}, "
+                f"{payment.paid_at.strftime('%H:%M')}"
+            )
+        else:
+            date = _format_date(payment.created_at)
 
         lines.append(
-            f"{icon} {date} — {title} "
+            f"{icon} #{payment.order_number} · {date} — {title} "
             f"({payment.generations} ген.) — "
             f"{payment.amount:.0f}₽{suffix}"
         )
