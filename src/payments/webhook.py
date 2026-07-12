@@ -244,6 +244,7 @@ async def yoomoney_webhook_handler(
 
         payment = await service.confirm_payment_by_label(
             label,
+            provider_transaction_id=data.get("operation_id"),
         )
 
         if payment is None:
