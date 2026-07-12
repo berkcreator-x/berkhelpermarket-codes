@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.keyboards import profile_nav_keyboard
 from src.models import GenerationType, Payment, PaymentStatus, User
 from src.payments import GENERATION_PACKAGES
-from src.repositories import PaymentRepository, UserRepository
+from src.repositories import GenerationStats, PaymentRepository, UserRepository
 
 router = Router(name="profile")
 
@@ -22,6 +22,12 @@ _RU_MONTHS = {
     1: "янв", 2: "фев", 3: "мар", 4: "апр",
     5: "май", 6: "июн", 7: "июл", 8: "авг",
     9: "сен", 10: "окт", 11: "ноя", 12: "дек",
+}
+
+_RU_MONTHS_FULL = {
+    1: "января", 2: "февраля", 3: "марта", 4: "апреля",
+    5: "мая", 6: "июня", 7: "июля", 8: "августа",
+    9: "сентября", 10: "октября", 11: "ноября", 12: "декабря",
 }
 
 _STATUS_ICON = {
@@ -41,6 +47,10 @@ _STATUS_SUFFIX = {
 
 def _format_date(dt: datetime.datetime) -> str:
     return f"{dt.day} {_RU_MONTHS[dt.month]}"
+
+
+def _format_full_date(dt: datetime.datetime) -> str:
+    return f"{dt.day} {_RU_MONTHS_FULL[dt.month]} {dt.year}"
 
 
 def _package_title(payment: Payment) -> str:
@@ -179,6 +189,50 @@ async def _build_purchases_text(
     )
 
 
+async def _build_stats_text(
+    user_repo: UserRepository,
+    user: User,
+) -> str:
+
+    stats: GenerationStats = await user_repo.get_generation_stats(
+        user
+    )
+
+    if stats.avg_quality is not None:
+        quality_line = f"{stats.avg_quality:.0f}/100"
+    else:
+        quality_line = "нет данных"
+
+    if stats.avg_duration_ms is not None:
+        duration_line = f"{stats.avg_duration_ms / 1000:.1f} сек."
+    else:
+        duration_line = "нет данных"
+
+    if stats.last_generation_at is not None:
+        last_generation_line = _format_full_date(
+            stats.last_generation_at
+        )
+    else:
+        last_generation_line = "ещё не было"
+
+    registered_line = _format_full_date(user.created_at)
+
+    return (
+        "📊 <b>Моя статистика</b>\n\n"
+
+        f"🚀 Всего генераций: <b>{stats.total}</b>\n"
+        f"🆕 Новых товаров: <b>{stats.new_count}</b>\n"
+        f"✨ Улучшений: <b>{stats.improve_count}</b>\n"
+        f"💎 Потрачено генераций: <b>{stats.total_cost}</b>\n\n"
+
+        f"⭐ Средняя оценка качества AI: <b>{quality_line}</b>\n"
+        f"⏱ Среднее время генерации: <b>{duration_line}</b>\n\n"
+
+        f"📅 Дата регистрации: <b>{registered_line}</b>\n"
+        f"🕐 Последняя генерация: <b>{last_generation_line}</b>"
+    )
+
+
 @router.message(F.text == "👤 Профиль")
 async def show_profile(
     message: Message,
@@ -224,6 +278,8 @@ async def profile_navigate(
         text = await _build_history_text(user_repo, user)
     elif view == "purchases":
         text = await _build_purchases_text(payment_repo, user)
+    elif view == "stats":
+        text = await _build_stats_text(user_repo, user)
     else:
         text = await _build_profile_text(user_repo, user)
 
