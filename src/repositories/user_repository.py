@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from dataclasses import dataclass
+import datetime
+
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.exceptions import InsufficientBalanceError
@@ -8,6 +11,17 @@ from src.models import GenerationLog, GenerationType, PlanType, User
 from src.utils import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationStats:
+    total: int
+    new_count: int
+    improve_count: int
+    total_cost: int
+    avg_quality: float | None
+    avg_duration_ms: float | None
+    last_generation_at: datetime.datetime | None
 
 
 class UserRepository:
@@ -265,3 +279,62 @@ class UserRepository:
         result = await self._session.execute(stmt)
 
         return list(result.scalars().all())
+
+    async def get_generation_stats(
+        self,
+        user: User,
+    ) -> GenerationStats:
+        """
+        Одним запросом собирает агрегированную статистику
+        генераций пользователя для раздела "Моя статистика".
+        """
+
+        stmt = select(
+            func.count(GenerationLog.id),
+            func.sum(
+                case(
+                    (GenerationLog.type == GenerationType.NEW, 1),
+                    else_=0,
+                )
+            ),
+            func.sum(
+                case(
+                    (GenerationLog.type == GenerationType.IMPROVE, 1),
+                    else_=0,
+                )
+            ),
+            func.coalesce(func.sum(GenerationLog.cost), 0),
+            func.avg(GenerationLog.quality_score),
+            func.avg(GenerationLog.duration_ms),
+            func.max(GenerationLog.created_at),
+        ).where(GenerationLog.user_id == user.id)
+
+        result = await self._session.execute(stmt)
+
+        (
+            total,
+            new_count,
+            improve_count,
+            total_cost,
+            avg_quality,
+            avg_duration_ms,
+            last_generation_at,
+        ) = result.one()
+
+        return GenerationStats(
+            total=int(total or 0),
+            new_count=int(new_count or 0),
+            improve_count=int(improve_count or 0),
+            total_cost=int(total_cost or 0),
+            avg_quality=(
+                float(avg_quality)
+                if avg_quality is not None
+                else None
+            ),
+            avg_duration_ms=(
+                float(avg_duration_ms)
+                if avg_duration_ms is not None
+                else None
+            ),
+            last_generation_at=last_generation_at,
+        )
