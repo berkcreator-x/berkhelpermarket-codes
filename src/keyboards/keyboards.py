@@ -16,8 +16,7 @@ def main_menu_keyboard(
 
     rows = [
         [
-            KeyboardButton(text="🆕 Новый товар"),
-            KeyboardButton(text="✨ Улучшить товар"),
+            KeyboardButton(text="🛠 Инструменты"),
         ],
         [
             KeyboardButton(text="👤 Профиль"),
@@ -38,8 +37,34 @@ def main_menu_keyboard(
     )
 
 
-def profile_nav_keyboard() -> InlineKeyboardMarkup:
+def tools_menu_keyboard() -> InlineKeyboardMarkup:
+    """
+    Подменю инструментов создания/улучшения карточек.
 
+    Сюда же в будущем добавляются новые функции
+    (улучшение фото, генерация баннеров и т.д.) —
+    без необходимости менять главное меню.
+    """
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🆕 Новый товар",
+                    callback_data="tools:new",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✨ Улучшить товар",
+                    callback_data="tools:improve",
+                ),
+            ],
+        ]
+    )
+
+
+def profile_nav_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
