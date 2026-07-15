@@ -6,6 +6,7 @@ from src.keyboards.keyboards import (
     main_menu_keyboard,
     payment_check_keyboard,
     profile_nav_keyboard,
+    tools_menu_keyboard,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "admin_panel_keyboard",
     "admin_users_pagination_keyboard",
     "profile_nav_keyboard",
+    "tools_menu_keyboard",
 ]
