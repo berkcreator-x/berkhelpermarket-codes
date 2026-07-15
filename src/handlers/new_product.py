@@ -22,9 +22,10 @@ logger = get_logger(__name__)
 router = Router(name="new_product")
 
 
-@router.message(F.text == "🆕 Новый товар")
-async def start_new_product(
-    message: Message,
+async def begin_new_product(
+    reply_target: Message,
+    telegram_id: int,
+    username: str | None,
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
@@ -32,16 +33,12 @@ async def start_new_product(
     user_repo = UserRepository(session)
 
     user = await user_repo.get_or_create(
-        telegram_id=message.from_user.id,  # type: ignore[union-attr]
-        username=(
-            message.from_user.username
-            if message.from_user
-            else None
-        ),
+        telegram_id=telegram_id,
+        username=username,
     )
 
     if user.generation_balance < 1:
-        await message.answer(
+        await reply_target.answer(
             "⚠️ У вас нет генераций для создания карточки.\n\n"
             "Пополните баланс в разделе «💳 Генерации»."
         )
@@ -51,10 +48,30 @@ async def start_new_product(
         NewProductStates.waiting_for_name
     )
 
-    await message.answer(
+    await reply_target.answer(
         "🆕 <b>Создание новой карточки товара</b>\n\n"
         "📦 Шаг 1 из 4\n\nКак называется ваш товар?",
         reply_markup=cancel_keyboard(),
+    )
+
+
+@router.message(F.text == "🆕 Новый товар")
+async def start_new_product(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+
+    await begin_new_product(
+        reply_target=message,
+        telegram_id=message.from_user.id,  # type: ignore[union-attr]
+        username=(
+            message.from_user.username
+            if message.from_user
+            else None
+        ),
+        state=state,
+        session=session,
     )
 
 
