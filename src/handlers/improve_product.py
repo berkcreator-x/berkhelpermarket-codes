@@ -22,25 +22,23 @@ logger = get_logger(__name__)
 router = Router(name="improve_product")
 
 
-@router.message(F.text == "✨ Улучшить товар")
-async def start_improve_product(
-    message: Message,
+async def begin_improve_product(
+    reply_target: Message,
+    telegram_id: int,
+    username: str | None,
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
+
     user_repo = UserRepository(session)
 
     user = await user_repo.get_or_create(
-        telegram_id=message.from_user.id,  # type: ignore[union-attr]
-        username=(
-            message.from_user.username
-            if message.from_user
-            else None
-        ),
+        telegram_id=telegram_id,
+        username=username,
     )
 
     if user.generation_balance < 2:
-        await message.answer(
+        await reply_target.answer(
             "⚠️ Для улучшения карточки нужно <b>2 генерации</b>, "
             f"а у вас сейчас <b>{user.generation_balance}</b>.\n\n"
             "Пополните баланс в разделе «💳 Генерации»."
@@ -51,11 +49,31 @@ async def start_improve_product(
         ImproveProductStates.waiting_for_text
     )
 
-    await message.answer(
+    await reply_target.answer(
         "✨ <b>Улучшение карточки товара</b>\n\n"
         "Вставьте текущее описание товара "
         "(можно скопировать прямо с маркетплейса):",
         reply_markup=cancel_keyboard(),
+    )
+
+
+@router.message(F.text == "✨ Улучшить товар")
+async def start_improve_product(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+
+    await begin_improve_product(
+        reply_target=message,
+        telegram_id=message.from_user.id,  # type: ignore[union-attr]
+        username=(
+            message.from_user.username
+            if message.from_user
+            else None
+        ),
+        state=state,
+        session=session,
     )
 
 
