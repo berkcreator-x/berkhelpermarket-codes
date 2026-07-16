@@ -254,18 +254,26 @@ class ProxyAPIClient:
         filename: str = "product.jpg",
         mime_type: str = "image/jpeg",
         size: str = "1024x1536",
-        quality: str = "medium",
+        quality: str = "low",
+        input_fidelity: str = "high",
     ) -> bytes:
         """
         Отправляет фото пользователя + текстовый промпт
-        в /images/edits (gpt-image-1-mini) и возвращает
-        готовое изображение как raw bytes (PNG).
+        в /images/edits и возвращает готовое изображение
+        как raw bytes (PNG).
 
-        В отличие от /images/generations, здесь модель
-        видит реальное фото товара и редактирует его
-        (новый фон/инфографика), а не рисует с нуля —
-        поэтому итоговый товар на картинке остаётся
-        узнаваемо тем же самым, а не "фантазией" ИИ.
+        input_fidelity="high" — критично важный параметр:
+        заставляет модель максимально точно сохранять
+        детали исходного фото (логотип, форму, цвет товара)
+        вместо творческой "фантазии". Не поддерживается
+        моделью gpt-image-1-mini — поэтому используется
+        gpt-image-1 (дороже, но реально сохраняет бренд).
+
+        quality="low" по умолчанию — контроль себестоимости
+        на время тестирования: input_fidelity и quality
+        независимые параметры, есть гипотеза, что низкое
+        quality не мешает высокой точности сохранения
+        деталей товара. Требует проверки на реальном фото.
         """
 
         if not settings.proxyapi_api_key:
@@ -287,6 +295,7 @@ class ProxyAPIClient:
             "prompt": prompt,
             "size": size,
             "quality": quality,
+            "input_fidelity": input_fidelity,
         }
 
         files = {
