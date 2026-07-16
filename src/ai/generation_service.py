@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import time
@@ -12,11 +13,13 @@ from src.ai.proxyapi_client import (
     proxyapi_client,
 )
 from src.ai.prompt_builder import (
+    image_prompts_prompt,
     improve_product_prompt,
     new_product_prompt,
 )
 from src.exceptions import (
     AIServiceError,
+    ImageGenerationError,
     InsufficientBalanceError,
     ProductValidationError,
 )
@@ -34,7 +37,11 @@ logger = get_logger(__name__)
 GENERATION_COSTS: dict[GenerationType, int] = {
     GenerationType.NEW: 1,
     GenerationType.IMPROVE: 2,
+    GenerationType.IMAGES: 5,
 }
+
+IMAGES_PER_BATCH = 5
+MIN_SUCCESSFUL_IMAGES = 1
 
 
 # ==========================================================
@@ -412,6 +419,164 @@ class GenerationService:
             GenerationType.IMPROVE,
             prompt,
         )
+
+    async def generate_product_images(
+        self,
+        user: User,
+        photo_bytes: bytes,
+        style_wishes: str,
+    ) -> tuple[list[bytes], int]:
+        """
+        Генерирует до 5 продающих изображений на основе
+        реального фото товара пользователя.
+
+        Списывает генерации ТОЛЬКО за реально успешно
+        сгенерированные изображения (частичный успех —
+        не повод забирать полную стоимость).
+
+        Возвращает (список готовых изображений, сколько
+        из 5 не удалось сгенерировать).
+        """
+
+        started_at = time.perf_counter()
+
+        if user.generation_balance < 1:
+            raise InsufficientBalanceError(
+                f"Need at least 1, have "
+                f"{user.generation_balance}"
+            )
+
+        prompts = await self._build_image_prompts(
+            user, style_wishes
+        )
+
+        results = await asyncio.gather(
+            *(
+                self._client.edit_image(
+                    image_bytes=photo_bytes,
+                    prompt=prompt,
+                )
+                for prompt in prompts
+            ),
+            return_exceptions=True,
+        )
+
+        images: list[bytes] = []
+
+        for result in results:
+
+            if isinstance(result, (bytes, bytearray)):
+                images.append(bytes(result))
+            else:
+                logger.warning(
+                    "image_generation_item_failed",
+                    user_id=user.id,
+                    error=str(result),
+                )
+
+        failed_count = len(prompts) - len(images)
+
+        if len(images) < MIN_SUCCESSFUL_IMAGES:
+
+            logger.error(
+                "image_generation_all_failed",
+                user_id=user.id,
+            )
+
+            raise ImageGenerationError(
+                "Не удалось сгенерировать ни одного "
+                "изображения. Попробуйте позже."
+            )
+
+        cost = len(images)
+
+        if user.generation_balance < cost:
+            cost = user.generation_balance
+
+        await self._user_repo.deduct_generations_safe(
+            user=user,
+            amount=cost,
+        )
+
+        duration_ms = int(
+            (time.perf_counter() - started_at) * 1000
+        )
+
+        status = "success" if failed_count == 0 else "partial"
+
+        await self._user_repo.log_generation(
+            user=user,
+            gen_type=GenerationType.IMAGES,
+            cost=cost,
+            duration_ms=duration_ms,
+            status=status,
+        )
+
+        logger.info(
+            "images_generated",
+            user_id=user.id,
+            requested=len(prompts),
+            succeeded=len(images),
+            failed=failed_count,
+            cost=cost,
+            balance=user.generation_balance,
+            duration_ms=duration_ms,
+        )
+
+        return images, failed_count
+
+    async def _build_image_prompts(
+        self,
+        user: User,
+        style_wishes: str,
+    ) -> list[str]:
+
+        prompt = image_prompts_prompt(style_wishes)
+
+        raw = await self._call_ai(
+            user=user,
+            gen_type=GenerationType.IMAGES,
+            prompt=prompt,
+            attempt=1,
+        )
+
+        try:
+
+            candidate = _extract_json(raw)
+            payload = json.loads(candidate)
+            prompts = payload.get("prompts")
+
+            if (
+                not isinstance(prompts, list)
+                or len(prompts) == 0
+            ):
+                raise ValueError(
+                    "prompts missing or empty"
+                )
+
+            cleaned = [
+                str(item).strip()
+                for item in prompts
+                if str(item).strip()
+            ]
+
+            if not cleaned:
+                raise ValueError("prompts empty after clean")
+
+            return cleaned[:IMAGES_PER_BATCH]
+
+        except Exception as exc:
+
+            logger.error(
+                "image_prompts_parse_failed",
+                preview=raw[:300],
+                error=str(exc),
+            )
+
+            raise ProductValidationError(
+                "AI вернул некорректный список промптов "
+                "для изображений."
+            ) from exc
 
     async def _run(
         self,
