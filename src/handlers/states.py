@@ -17,3 +17,8 @@ class ImproveProductStates(StatesGroup):
 class AdminGrantStates(StatesGroup):
     waiting_for_telegram_id = State()
     waiting_for_amount = State()
+
+
+class ImageGenerationStates(StatesGroup):
+    waiting_for_photo = State()
+    waiting_for_style = State()
