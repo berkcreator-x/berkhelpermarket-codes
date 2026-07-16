@@ -10,10 +10,15 @@ from src.payments.webhook import (
     register_webhook_routes,
 )
 
+from src.payments.expiry_worker import (
+    run_payment_expiry_loop,
+)
+
 __all__ = (
     "GenerationPackage",
     "GENERATION_PACKAGES",
     "get_package",
     "PaymentService",
     "register_webhook_routes",
+    "run_payment_expiry_loop",
 )
