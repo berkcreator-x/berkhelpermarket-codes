@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 
 from src.bot import create_bot, create_dispatcher
 from src.config import settings
-from src.payments import register_webhook_routes
+from src.payments import register_webhook_routes, run_payment_expiry_loop
 from src.utils import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -109,12 +109,17 @@ async def main() -> None:
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     dispatcher = create_dispatcher(redis)
 
+    expiry_task = asyncio.create_task(
+        run_payment_expiry_loop(),
+    )
+
     try:
         if settings.webhook_base_url:
             await run_webhook(bot, dispatcher)
         else:
             await run_polling(bot, dispatcher)
     finally:
+        expiry_task.cancel()
         await redis.aclose()
         await _close_httpx_clients()
 
