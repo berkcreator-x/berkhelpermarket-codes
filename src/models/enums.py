@@ -11,6 +11,7 @@ class PlanType(str, enum.Enum):
 class GenerationType(str, enum.Enum):
     NEW = "new"
     IMPROVE = "improve"
+    IMAGES = "images"
 
 
 class PaymentStatus(str, enum.Enum):
