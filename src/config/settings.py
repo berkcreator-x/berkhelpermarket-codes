@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     proxyapi_api_key: str
     proxyapi_base_url: str = "https://api.proxyapi.ru/openai/v1"
     ai_model: str = "gpt-4o-mini"
-    ai_image_model: str = "gpt-image-1-mini"
+    ai_image_model: str = "gpt-image-1"
 
     # ── YooMoney ──────────────────────────────────────────────────────────────
     yoomoney_wallet: str
