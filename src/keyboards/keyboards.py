@@ -60,6 +60,12 @@ def tools_menu_keyboard() -> InlineKeyboardMarkup:
                     callback_data="tools:improve",
                 ),
             ],
+            [
+                InlineKeyboardButton(
+                    text="🖼 Улучшить фото товара",
+                    callback_data="tools:photo",
+                ),
+            ],
         ]
     )
 
