@@ -13,13 +13,12 @@ from src.ai.proxyapi_client import (
     proxyapi_client,
 )
 from src.ai.prompt_builder import (
-    image_prompts_prompt,
+    analyze_product_prompt,
     improve_product_prompt,
     new_product_prompt,
 )
 from src.exceptions import (
     AIServiceError,
-    ImageGenerationError,
     InsufficientBalanceError,
     ProductValidationError,
 )
@@ -37,11 +36,8 @@ logger = get_logger(__name__)
 GENERATION_COSTS: dict[GenerationType, int] = {
     GenerationType.NEW: 1,
     GenerationType.IMPROVE: 2,
-    GenerationType.IMAGES: 5,
+    GenerationType.ANALYSIS: 1,
 }
-
-IMAGES_PER_BATCH = 5
-MIN_SUCCESSFUL_IMAGES = 1
 
 
 # ==========================================================
@@ -95,6 +91,68 @@ class ProductCard:
         if self.characteristics:
             parts.append(
                 f"📦 <b>Характеристики</b>\n{characteristics}"
+            )
+
+        return "\n\n".join(parts)
+
+
+# ==========================================================
+# PRODUCT ANALYSIS
+# ==========================================================
+
+@dataclass(slots=True, frozen=True)
+class ProductAnalysis:
+    score: int
+    strengths: list[str] = field(default_factory=list)
+    weaknesses: list[str] = field(default_factory=list)
+    missing_keywords: list[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
+
+    def to_message(self) -> str:
+
+        strengths = "\n".join(
+            f"✅ {html.escape(item)}"
+            for item in self.strengths
+        )
+
+        weaknesses = "\n".join(
+            f"⚠️ {html.escape(item)}"
+            for item in self.weaknesses
+        )
+
+        keywords = ", ".join(
+            html.escape(item)
+            for item in self.missing_keywords
+        )
+
+        recommendations = "\n".join(
+            f"👉 {html.escape(item)}"
+            for item in self.recommendations
+        )
+
+        parts = [
+            f"📊 <b>Анализ карточки товара</b>\n\n"
+            f"Оценка: <b>{self.score}/100</b>",
+        ]
+
+        if self.strengths:
+            parts.append(
+                f"✅ <b>Сильные стороны</b>\n{strengths}"
+            )
+
+        if self.weaknesses:
+            parts.append(
+                f"⚠️ <b>Слабые места</b>\n{weaknesses}"
+            )
+
+        if self.missing_keywords:
+            parts.append(
+                f"🔍 <b>Недостающие SEO-ключи</b>\n{keywords}"
+            )
+
+        if self.recommendations:
+            parts.append(
+                f"👉 <b>Рекомендации</b>\n{recommendations}"
             )
 
         return "\n\n".join(parts)
@@ -367,6 +425,80 @@ def _parse_card(raw: str) -> ProductCard:
     return card
 
 
+def _parse_analysis(raw: str) -> ProductAnalysis:
+
+    candidate = _extract_json(raw)
+
+    try:
+
+        payload = json.loads(candidate)
+
+    except Exception as exc:
+
+        logger.warning(
+            "ai_analysis_json_decode_failed",
+            preview=raw[:400],
+            error=str(exc),
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid JSON."
+        ) from exc
+
+    if not isinstance(payload, dict):
+
+        raise ProductValidationError(
+            "JSON root must be object."
+        )
+
+    payload = {
+        str(k).lower().strip(): v
+        for k, v in payload.items()
+    }
+
+    try:
+        score = int(payload.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0
+
+    score = max(0, min(100, score))
+
+    strengths = _normalize_list(
+        payload.get("strengths")
+    )
+
+    weaknesses = _normalize_list(
+        payload.get("weaknesses")
+    )
+
+    missing_keywords = _normalize_list(
+        payload.get("missing_keywords")
+    )
+
+    recommendations = _normalize_list(
+        payload.get("recommendations")
+    )
+
+    if not strengths and not weaknesses and not recommendations:
+
+        logger.warning(
+            "ai_analysis_invalid_structure",
+            preview=raw[:300],
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid response."
+        )
+
+    return ProductAnalysis(
+        score=score,
+        strengths=strengths,
+        weaknesses=weaknesses,
+        missing_keywords=missing_keywords,
+        recommendations=recommendations,
+    )
+
+
 # ==========================================================
 # SERVICE
 # ==========================================================
@@ -389,6 +521,8 @@ class GenerationService:
         category: str,
         features: str,
         audience: str,
+        platform: str = "universal",
+        price: str | None = None,
     ) -> ProductCard:
 
         prompt = new_product_prompt(
@@ -396,6 +530,8 @@ class GenerationService:
             category,
             features,
             audience,
+            platform,
+            price,
         )
 
         return await self._run(
@@ -420,78 +556,71 @@ class GenerationService:
             prompt,
         )
 
-    async def generate_product_images(
+    async def analyze_product(
         self,
         user: User,
-        photo_bytes: bytes,
-        style_wishes: str,
-    ) -> tuple[list[bytes], int]:
+        existing_text: str,
+    ) -> ProductAnalysis:
         """
-        Генерирует до 5 продающих изображений на основе
-        реального фото товара пользователя.
-
-        Списывает генерации ТОЛЬКО за реально успешно
-        сгенерированные изображения (частичный успех —
-        не повод забирать полную стоимость).
-
-        Возвращает (список готовых изображений, сколько
-        из 5 не удалось сгенерировать).
+        Анализирует текст карточки (своей или конкурента):
+        оценка, сильные/слабые стороны, недостающие SEO-ключи,
+        рекомендации. Не создаёт новую карточку — только
+        разбор существующего текста.
         """
 
         started_at = time.perf_counter()
 
-        if user.generation_balance < 1:
-            raise InsufficientBalanceError(
-                f"Need at least 1, have "
-                f"{user.generation_balance}"
-            )
-
-        prompts = await self._build_image_prompts(
-            user, style_wishes
-        )
-
-        results = await asyncio.gather(
-            *(
-                self._client.edit_image(
-                    image_bytes=photo_bytes,
-                    prompt=prompt,
-                )
-                for prompt in prompts
-            ),
-            return_exceptions=True,
-        )
-
-        images: list[bytes] = []
-
-        for result in results:
-
-            if isinstance(result, (bytes, bytearray)):
-                images.append(bytes(result))
-            else:
-                logger.warning(
-                    "image_generation_item_failed",
-                    user_id=user.id,
-                    error=str(result),
-                )
-
-        failed_count = len(prompts) - len(images)
-
-        if len(images) < MIN_SUCCESSFUL_IMAGES:
-
-            logger.error(
-                "image_generation_all_failed",
-                user_id=user.id,
-            )
-
-            raise ImageGenerationError(
-                "Не удалось сгенерировать ни одного "
-                "изображения. Попробуйте позже."
-            )
-
-        cost = len(images)
+        cost = GENERATION_COSTS[GenerationType.ANALYSIS]
 
         if user.generation_balance < cost:
-            cost = user.generation_balance
+
+            logger.info(
+                "analysis_not_enough_balance",
+                user_id=user.id,
+                required=cost,
+                current=user.generation_balance,
+            )
+
+            raise InsufficientBalanceError(
+                f"Need {cost}, have {user.generation_balance}"
+            )
+
+        prompt = analyze_product_prompt(existing_text)
+
+        last_reason = ""
+        analysis: ProductAnalysis | None = None
+
+        for attempt in range(1, MAX_AI_ATTEMPTS + 1):
+
+            raw = await self._call_ai(
+                user,
+                GenerationType.ANALYSIS,
+                prompt,
+                attempt,
+                last_reason,
+            )
+
+            try:
+                analysis = _parse_analysis(raw)
+                break
+
+            except ProductValidationError as exc:
+
+                last_reason = str(exc)
+
+                logger.warning(
+                    "analysis_validation_failed",
+                    user_id=user.id,
+                    reason=str(exc),
+                )
+
+                if attempt == MAX_AI_ATTEMPTS:
+                    raise
+
+        if analysis is None:
+            raise ProductValidationError(
+                "AI returned invalid response."
+            )
 
         await self._user_repo.deduct_generations_safe(
             user=user,
@@ -502,81 +631,23 @@ class GenerationService:
             (time.perf_counter() - started_at) * 1000
         )
 
-        status = "success" if failed_count == 0 else "partial"
-
         await self._user_repo.log_generation(
             user=user,
-            gen_type=GenerationType.IMAGES,
+            gen_type=GenerationType.ANALYSIS,
             cost=cost,
             duration_ms=duration_ms,
-            status=status,
         )
 
         logger.info(
-            "images_generated",
+            "analysis_completed",
             user_id=user.id,
-            requested=len(prompts),
-            succeeded=len(images),
-            failed=failed_count,
-            cost=cost,
+            spent=cost,
             balance=user.generation_balance,
             duration_ms=duration_ms,
+            score=analysis.score,
         )
 
-        return images, failed_count
-
-    async def _build_image_prompts(
-        self,
-        user: User,
-        style_wishes: str,
-    ) -> list[str]:
-
-        prompt = image_prompts_prompt(style_wishes)
-
-        raw = await self._call_ai(
-            user=user,
-            gen_type=GenerationType.IMAGES,
-            prompt=prompt,
-            attempt=1,
-        )
-
-        try:
-
-            candidate = _extract_json(raw)
-            payload = json.loads(candidate)
-            prompts = payload.get("prompts")
-
-            if (
-                not isinstance(prompts, list)
-                or len(prompts) == 0
-            ):
-                raise ValueError(
-                    "prompts missing or empty"
-                )
-
-            cleaned = [
-                str(item).strip()
-                for item in prompts
-                if str(item).strip()
-            ]
-
-            if not cleaned:
-                raise ValueError("prompts empty after clean")
-
-            return cleaned[:IMAGES_PER_BATCH]
-
-        except Exception as exc:
-
-            logger.error(
-                "image_prompts_parse_failed",
-                preview=raw[:300],
-                error=str(exc),
-            )
-
-            raise ProductValidationError(
-                "AI вернул некорректный список промптов "
-                "для изображений."
-            ) from exc
+        return analysis
 
     async def _run(
         self,
