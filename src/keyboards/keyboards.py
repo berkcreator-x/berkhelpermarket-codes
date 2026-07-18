@@ -10,6 +10,44 @@ from aiogram.types import (
 from src.payments import GENERATION_PACKAGES
 
 
+def platform_select_keyboard() -> InlineKeyboardMarkup:
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Wildberries",
+                    callback_data="platform:wildberries",
+                ),
+                InlineKeyboardButton(
+                    text="Ozon",
+                    callback_data="platform:ozon",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Универсальная (обе площадки)",
+                    callback_data="platform:universal",
+                ),
+            ],
+        ]
+    )
+
+
+def skip_price_keyboard() -> InlineKeyboardMarkup:
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Пропустить",
+                    callback_data="price:skip",
+                ),
+            ],
+        ]
+    )
+
+
 def main_menu_keyboard(
     is_admin: bool = False,
 ) -> ReplyKeyboardMarkup:
@@ -62,8 +100,8 @@ def tools_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="🖼 Улучшить фото товара",
-                    callback_data="tools:photo",
+                    text="📊 Анализ товара",
+                    callback_data="tools:analysis",
                 ),
             ],
         ]
