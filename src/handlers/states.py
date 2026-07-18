@@ -8,6 +8,8 @@ class NewProductStates(StatesGroup):
     waiting_for_category = State()
     waiting_for_features = State()
     waiting_for_audience = State()
+    waiting_for_platform = State()
+    waiting_for_price = State()
 
 
 class ImproveProductStates(StatesGroup):
@@ -19,6 +21,5 @@ class AdminGrantStates(StatesGroup):
     waiting_for_amount = State()
 
 
-class ImageGenerationStates(StatesGroup):
-    waiting_for_photo = State()
-    waiting_for_style = State()
+class ProductAnalysisStates(StatesGroup):
+    waiting_for_text = State()
