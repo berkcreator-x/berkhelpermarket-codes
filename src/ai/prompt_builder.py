@@ -1,300 +1,872 @@
 from __future__ import annotations
 
-SYSTEM_PROMPT = """
-Ты — профессиональный Senior E-commerce Copywriter.
+import asyncio
+import html
+import json
+import time
+from dataclasses import dataclass, field
+from typing import Any
 
-Специализация:
+from src.ai.proxyapi_client import (
+    ProxyAPIClient,
+    ProxyAPIError,
+    proxyapi_client,
+)
+from src.ai.prompt_builder import (
+    analyze_product_prompt,
+    improve_product_prompt,
+    new_product_prompt,
+)
+from src.exceptions import (
+    AIServiceError,
+    InsufficientBalanceError,
+    ProductValidationError,
+)
+from src.models import GenerationType, User
+from src.repositories import UserRepository
+from src.utils import get_logger
 
-• Wildberries
-• Ozon
-• Яндекс Маркет
-• Shopify
-• Amazon
+logger = get_logger(__name__)
 
-Ты более 10 лет создаешь продающие карточки товаров с высокой конверсией.
 
-Главная цель — увеличить вероятность покупки товара.
+# ==========================================================
+# COSTS
+# ==========================================================
 
-==================================
-ФОРМАТ ОТВЕТА
-==================================
-
-Верни ТОЛЬКО JSON.
-
-Без markdown.
-
-Без ```.
-
-Без пояснений.
-
-Без текста до JSON.
-
-Без текста после JSON.
-
-Структура должна быть строго такой:
-
-{
-  "title": "",
-  "description": "",
-  "advantages": [],
-  "seo": "",
-  "characteristics": []
+GENERATION_COSTS: dict[GenerationType, int] = {
+    GenerationType.NEW: 1,
+    GenerationType.IMPROVE: 2,
+    GenerationType.ANALYSIS: 1,
 }
 
-==================================
-ОБЩИЕ ПРАВИЛА
-==================================
 
-Никогда не оставляй пустые поля.
+# ==========================================================
+# AI VALIDATION
+# ==========================================================
+
+MAX_AI_ATTEMPTS = 2
+
+MIN_TITLE_LENGTH = 20
+MAX_TITLE_LENGTH = 80
+MIN_DESCRIPTION_LENGTH = 200
+
+MIN_ADVANTAGES = 5
+MIN_CHARACTERISTICS = 3
+MIN_SEO_KEYWORDS = 10
+
+QUALITY_SCORE_TO_ACCEPT = 70
+
+
+# ==========================================================
+# PRODUCT CARD
+# ==========================================================
+
+@dataclass(slots=True, frozen=True)
+class ProductCard:
+    title: str
+    description: str
+    advantages: list[str] = field(default_factory=list)
+    seo: str = ""
+    characteristics: list[str] = field(default_factory=list)
 
-Если информации недостаточно —
-логично дополни ее.
+    def to_message(self) -> str:
 
-Не выдумывай бренды.
+        advantages = "\n".join(
+            f"• {html.escape(item)}"
+            for item in self.advantages
+        )
 
-Не выдумывай технические характеристики,
-если они противоречат описанию.
+        characteristics = "\n".join(
+            f"• {html.escape(item)}"
+            for item in self.characteristics
+        )
 
-Не используй канцелярит.
+        parts = [
+            f"🏷 <b>Название</b>\n{html.escape(self.title)}",
+            f"📝 <b>Описание</b>\n{html.escape(self.description)}",
+            f"⭐ <b>Преимущества</b>\n{advantages}",
+            f"🔍 <b>SEO</b>\n{html.escape(self.seo)}",
+        ]
 
-Не используй бессмысленные фразы.
+        if self.characteristics:
+            parts.append(
+                f"📦 <b>Характеристики</b>\n{characteristics}"
+            )
 
-Не повторяй одни и те же слова.
+        return "\n\n".join(parts)
 
-Пиши простым человеческим языком.
 
-Текст должен легко читаться.
+# ==========================================================
+# PRODUCT ANALYSIS
+# ==========================================================
 
-Не используй эмодзи.
+@dataclass(slots=True, frozen=True)
+class ProductAnalysis:
+    score: int
+    strengths: list[str] = field(default_factory=list)
+    weaknesses: list[str] = field(default_factory=list)
+    missing_keywords: list[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
-Не используй HTML.
+    def to_message(self) -> str:
 
-Не используй Markdown.
+        strengths = "\n".join(
+            f"✅ {html.escape(item)}"
+            for item in self.strengths
+        )
 
-==================================
-TITLE
-==================================
+        weaknesses = "\n".join(
+            f"⚠️ {html.escape(item)}"
+            for item in self.weaknesses
+        )
 
-Максимум 80 символов.
+        keywords = ", ".join(
+            html.escape(item)
+            for item in self.missing_keywords
+        )
 
-Содержит:
+        recommendations = "\n".join(
+            f"👉 {html.escape(item)}"
+            for item in self.recommendations
+        )
 
-Название товара.
+        parts = [
+            f"📊 <b>Анализ карточки товара</b>\n\n"
+            f"Оценка: <b>{self.score}/100</b>",
+        ]
 
-Главные преимущества.
+        if self.strengths:
+            parts.append(
+                f"✅ <b>Сильные стороны</b>\n{strengths}"
+            )
 
-Самые важные ключевые слова.
+        if self.weaknesses:
+            parts.append(
+                f"⚠️ <b>Слабые места</b>\n{weaknesses}"
+            )
 
-Должен быть естественным.
+        if self.missing_keywords:
+            parts.append(
+                f"🔍 <b>Недостающие SEO-ключи</b>\n{keywords}"
+            )
 
-Без повторений.
+        if self.recommendations:
+            parts.append(
+                f"👉 <b>Рекомендации</b>\n{recommendations}"
+            )
 
-==================================
-DESCRIPTION
-==================================
+        return "\n\n".join(parts)
 
-4–6 полноценных предложений.
 
-Структура:
+# ==========================================================
+# JSON PARSER
+# ==========================================================
 
-1. Какая проблема.
+def _strip_code_fence(raw: str) -> str:
 
-2. Как товар её решает.
+    text = raw.strip()
 
-3. Какие преимущества получает покупатель.
+    if text.startswith("```"):
 
-4. Почему стоит выбрать именно этот товар.
+        parts = text.split("```")
 
-5. Мягкий призыв к покупке.
+        if len(parts) >= 2:
+            text = parts[1].strip()
 
-Описание должно быть убедительным.
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
 
-Без воды.
+    return text
 
-Без повторений.
 
-==================================
-ADVANTAGES
-==================================
+def _extract_json(raw: str) -> str:
 
-От 5 до 7 преимуществ.
+    text = _strip_code_fence(raw)
 
-Каждый пункт —
+    start = text.find("{")
+    end = text.rfind("}")
 
-одно законченное предложение.
+    if start == -1 or end == -1:
+        return text
 
-Без:
+    return text[start : end + 1]
 
--
 
-•
+def _normalize_string(value: Any) -> str:
 
-Нумерации.
+    if value is None:
+        return ""
 
-Каждое преимущество должно быть уникальным.
+    if isinstance(value, list):
+        return "\n".join(
+            str(x).strip()
+            for x in value
+            if str(x).strip()
+        )
 
-==================================
-SEO
-==================================
+    return (
+        str(value)
+        .replace("\r", "")
+        .strip()
+    )
 
-10–15 поисковых запросов.
 
-Через запятую.
+def _normalize_list(value: Any) -> list[str]:
 
-Используй естественные запросы.
+    if value is None:
+        return []
 
-Не повторяй одинаковые слова подряд.
+    if isinstance(value, list):
 
-==================================
-CHARACTERISTICS
-==================================
+        return [
+            str(x).strip(" -*•\t")
+            for x in value
+            if str(x).strip()
+        ]
 
-Массив строк.
+    if isinstance(value, str):
 
-Каждый элемент:
+        if "," in value and "\n" not in value:
 
-Название: Значение
+            return [
+                item.strip(" -*•")
+                for item in value.split(",")
+                if item.strip()
+            ]
 
-Если характеристик мало —
-логично дополни их.
+        return [
+            item.strip(" -*•")
+            for item in value.splitlines()
+            if item.strip()
+        ]
 
-==================================
-ВАЖНО
-==================================
+    return [
+        str(value).strip(" -*•\t")
+    ]
 
-Главная задача —
-создать карточку,
-которая максимально увеличивает вероятность покупки товара.
-""".strip()
 
+def _count_seo_keywords(seo: str) -> int:
 
-def new_product_prompt(
-    name: str,
-    category: str,
-    features: str,
-    audience: str,
-) -> str:
-    return f"""
-Создай продающую карточку товара.
+    if not seo:
+        return 0
 
-Название товара:
-{name}
+    return len(
+        [
+            item.strip()
+            for item in seo.replace("\n", ",").split(",")
+            if item.strip()
+        ]
+    )
 
-Категория:
-{category}
 
-Особенности:
-{features}
+def _calculate_quality_score(
+    card: ProductCard,
+) -> int:
 
-Целевая аудитория:
-{audience}
+    score = 0
 
-Учитывай особенности маркетплейсов.
+    # TITLE
 
-Используй преимущества товара максимально естественно.
+    if len(card.title) >= MIN_TITLE_LENGTH:
+        score += 20
 
-Верни строго JSON.
-""".strip()
+    # DESCRIPTION
 
+    if len(card.description) >= MIN_DESCRIPTION_LENGTH:
+        score += 30
 
-def improve_product_prompt(
-    existing_text: str,
-) -> str:
-    return f"""
-Перед тобой существующая карточка товара.
+    # ADVANTAGES
 
-{existing_text}
+    if len(card.advantages) >= MIN_ADVANTAGES:
+        score += 20
 
-Твоя задача:
+    # SEO
 
-Полностью переписать текст.
+    if (
+        _count_seo_keywords(card.seo)
+        >= MIN_SEO_KEYWORDS
+    ):
+        score += 20
 
-Сделать его более продающим.
+    # CHARACTERISTICS
 
-Улучшить SEO.
+    if (
+        len(card.characteristics)
+        >= MIN_CHARACTERISTICS
+    ):
+        score += 10
 
-Улучшить читаемость.
+    return score
 
-Убрать повторы.
 
-Добавить недостающие преимущества.
+def _validate_card(
+    card: ProductCard,
+) -> None:
 
-Сохранить смысл.
+    if len(card.title) < MIN_TITLE_LENGTH:
 
-Верни только JSON.
-""".strip()
+        raise ProductValidationError(
+            "Title too short."
+        )
 
+    if len(card.title) > MAX_TITLE_LENGTH:
 
-def image_prompts_prompt(
-    style_wishes: str,
-) -> str:
-    return f"""
-Ты — арт-директор, который готовит техническое задание
-для нейросети, редактирующей изображения (image editing model).
+        raise ProductValidationError(
+            "Title too long."
+        )
 
-Пользователь прислал реальное фото своего товара и хочет
-получить 5 профессиональных изображений для карточки на
-маркетплейсе (Wildberries/Ozon) на основе ЭТОГО ЖЕ товара.
+    if len(card.description) < MIN_DESCRIPTION_LENGTH:
 
-Пожелания пользователя по стилю:
-{style_wishes}
+        raise ProductValidationError(
+            "Description too short."
+        )
 
-==================================
-ЖЁСТКИЕ ПРАВИЛА (не нарушать НИКОГДА,
-даже если пожелания пользователя расплывчаты
-или противоречат этому):
-==================================
+    if len(card.advantages) < MIN_ADVANTAGES:
 
-- Это карточка МАРКЕТПЛЕЙСА, а не рекламный баннер
-  и не пост в соцсетях.
-- ЗАПРЕЩЕНО: кричащие рекламные надписи вроде
-  "BUY NOW", "LIMITED TIME OFFER", "СКИДКА", таймеры,
-  звёзды/вспышки/лучи как фон, кликбейтная типографика.
-- ЗАПРЕЩЕНО менять сам товар: его форму, цвет, логотип,
-  надписи на нём. Меняется ТОЛЬКО фон, окружение,
-  композиция и опциональные инфографические элементы
-  (иконки, короткие подписи характеристик).
-- Стиль — чистый, светлый или нейтральный фон (если явно
-  не указано иное), спокойная профессиональная эстетика,
-  как у топовых карточек WB/Ozon: товар всегда в фокусе,
-  ничего не отвлекает от него.
-- Если пожелания пользователя неконкретны (например
-  "на свой вкус") — используй нейтральный премиальный
-  минимализм по умолчанию, а не творческую "рекламную"
-  интерпретацию.
+        raise ProductValidationError(
+            "Too few advantages."
+        )
 
-Твоя задача — написать 5 детальных промптов на английском
-языке для image editing модели. Каждый промпт должен:
+    if (
+        _count_seo_keywords(card.seo)
+        < MIN_SEO_KEYWORDS
+    ):
 
-- явно указывать, что нужно СОХРАНИТЬ реальный товар с фото
-  без изменений (его форму, цвет, все надписи и логотипы),
-  меняя только фон и окружение;
-- учитывать пожелания пользователя по стилю в рамках
-  жёстких правил выше;
-- быть самодостаточным и подробным.
+        raise ProductValidationError(
+            "Too few SEO keywords."
+        )
 
-Роли 5 изображений строго в этом порядке:
+    if (
+        len(card.characteristics)
+        < MIN_CHARACTERISTICS
+    ):
 
-1. Главная обложка — товар крупным планом на чистом фоне
-2. Акцент на преимуществах товара (можно добавить
-   аккуратные иконки/короткие подписи-характеристики)
-3. Демонстрация деталей товара крупным планом
-4. Товар в естественном контексте использования
-5. Финальный кадр — товар на нейтральном премиальном
-   фоне, БЕЗ рекламных надписей и баннерной эстетики
+        raise ProductValidationError(
+            "Too few characteristics."
+        )
 
-Формат ответа — строго JSON, без markdown, без ```` ```` ,
-без пояснений, только:
 
-{{
-  "prompts": [
-    "промпт для изображения 1",
-    "промпт для изображения 2",
-    "промпт для изображения 3",
-    "промпт для изображения 4",
-    "промпт для изображения 5"
-  ]
-}}
+def _parse_card(raw: str) -> ProductCard:
 
-Верни строго JSON.
-""".strip()
+    candidate = _extract_json(raw)
+
+    try:
+
+        payload = json.loads(candidate)
+
+    except Exception as exc:
+
+        logger.warning(
+            "ai_json_decode_failed",
+            preview=raw[:400],
+            error=str(exc),
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid JSON."
+        ) from exc
+
+    if not isinstance(payload, dict):
+
+        raise ProductValidationError(
+            "JSON root must be object."
+        )
+
+    payload = {
+        str(k).lower().strip(): v
+        for k, v in payload.items()
+    }
+
+    payload = {
+        k: v
+        for k, v in payload.items()
+        if v is not None
+    }
+
+    title = _normalize_string(
+        payload.get("title")
+    )
+
+    description = _normalize_string(
+        payload.get("description")
+    )
+
+    advantages = _normalize_list(
+        payload.get("advantages")
+    )
+
+    seo = _normalize_string(
+        payload.get("seo")
+    )
+
+    characteristics = _normalize_list(
+        payload.get("characteristics")
+    )
+
+    if not title or not description:
+
+        logger.warning(
+            "ai_invalid_structure",
+            preview=raw[:300],
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid response."
+        )
+
+    card = ProductCard(
+        title=title,
+        description=description,
+        advantages=advantages,
+        seo=seo,
+        characteristics=characteristics,
+    )
+
+    return card
+
+
+def _parse_analysis(raw: str) -> ProductAnalysis:
+
+    candidate = _extract_json(raw)
+
+    try:
+
+        payload = json.loads(candidate)
+
+    except Exception as exc:
+
+        logger.warning(
+            "ai_analysis_json_decode_failed",
+            preview=raw[:400],
+            error=str(exc),
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid JSON."
+        ) from exc
+
+    if not isinstance(payload, dict):
+
+        raise ProductValidationError(
+            "JSON root must be object."
+        )
+
+    payload = {
+        str(k).lower().strip(): v
+        for k, v in payload.items()
+    }
+
+    try:
+        score = int(payload.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0
+
+    score = max(0, min(100, score))
+
+    strengths = _normalize_list(
+        payload.get("strengths")
+    )
+
+    weaknesses = _normalize_list(
+        payload.get("weaknesses")
+    )
+
+    missing_keywords = _normalize_list(
+        payload.get("missing_keywords")
+    )
+
+    recommendations = _normalize_list(
+        payload.get("recommendations")
+    )
+
+    if not strengths and not weaknesses and not recommendations:
+
+        logger.warning(
+            "ai_analysis_invalid_structure",
+            preview=raw[:300],
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid response."
+        )
+
+    return ProductAnalysis(
+        score=score,
+        strengths=strengths,
+        weaknesses=weaknesses,
+        missing_keywords=missing_keywords,
+        recommendations=recommendations,
+    )
+
+
+# ==========================================================
+# SERVICE
+# ==========================================================
+
+class GenerationService:
+
+    def __init__(
+        self,
+        user_repo: UserRepository,
+        client: ProxyAPIClient = proxyapi_client,
+    ) -> None:
+
+        self._user_repo = user_repo
+        self._client = client
+
+    async def generate_new_product(
+        self,
+        user: User,
+        name: str,
+        category: str,
+        features: str,
+        audience: str,
+        platform: str = "universal",
+        price: str | None = None,
+    ) -> ProductCard:
+
+        prompt = new_product_prompt(
+            name,
+            category,
+            features,
+            audience,
+            platform,
+            price,
+        )
+
+        return await self._run(
+            user,
+            GenerationType.NEW,
+            prompt,
+        )
+
+    async def improve_product(
+        self,
+        user: User,
+        existing_text: str,
+    ) -> ProductCard:
+
+        prompt = improve_product_prompt(
+            existing_text,
+        )
+
+        return await self._run(
+            user,
+            GenerationType.IMPROVE,
+            prompt,
+        )
+
+    async def analyze_product(
+        self,
+        user: User,
+        existing_text: str,
+    ) -> ProductAnalysis:
+        """
+        Анализирует текст карточки (своей или конкурента):
+        оценка, сильные/слабые стороны, недостающие SEO-ключи,
+        рекомендации. Не создаёт новую карточку — только
+        разбор существующего текста.
+        """
+
+        started_at = time.perf_counter()
+
+        cost = GENERATION_COSTS[GenerationType.ANALYSIS]
+
+        if user.generation_balance < cost:
+
+            logger.info(
+                "analysis_not_enough_balance",
+                user_id=user.id,
+                required=cost,
+                current=user.generation_balance,
+            )
+
+            raise InsufficientBalanceError(
+                f"Need {cost}, have {user.generation_balance}"
+            )
+
+        prompt = analyze_product_prompt(existing_text)
+
+        last_reason = ""
+        analysis: ProductAnalysis | None = None
+
+        for attempt in range(1, MAX_AI_ATTEMPTS + 1):
+
+            raw = await self._call_ai(
+                user,
+                GenerationType.ANALYSIS,
+                prompt,
+                attempt,
+                last_reason,
+            )
+
+            try:
+                analysis = _parse_analysis(raw)
+                break
+
+            except ProductValidationError as exc:
+
+                last_reason = str(exc)
+
+                logger.warning(
+                    "analysis_validation_failed",
+                    user_id=user.id,
+                    reason=str(exc),
+                )
+
+                if attempt == MAX_AI_ATTEMPTS:
+                    raise
+
+        if analysis is None:
+            raise ProductValidationError(
+                "AI returned invalid response."
+            )
+
+        await self._user_repo.deduct_generations_safe(
+            user=user,
+            amount=cost,
+        )
+
+        duration_ms = int(
+            (time.perf_counter() - started_at) * 1000
+        )
+
+        await self._user_repo.log_generation(
+            user=user,
+            gen_type=GenerationType.ANALYSIS,
+            cost=cost,
+            duration_ms=duration_ms,
+        )
+
+        logger.info(
+            "analysis_completed",
+            user_id=user.id,
+            spent=cost,
+            balance=user.generation_balance,
+            duration_ms=duration_ms,
+            score=analysis.score,
+        )
+
+        return analysis
+
+    async def _run(
+        self,
+        user: User,
+        gen_type: GenerationType,
+        prompt: str,
+    ) -> ProductCard:
+
+        started_at = time.perf_counter()
+
+        cost = GENERATION_COSTS[gen_type]
+
+        if user.generation_balance < cost:
+
+            logger.info(
+                "generation_not_enough_balance",
+                user_id=user.id,
+                required=cost,
+                current=user.generation_balance,
+            )
+
+            raise InsufficientBalanceError(
+                f"Need {cost}, have {user.generation_balance}"
+            )
+
+        card, quality = await self._generate_card(
+            user,
+            gen_type,
+            prompt,
+        )
+
+        await self._user_repo.deduct_generations_safe(
+            user=user,
+            amount=cost,
+        )
+
+        duration_ms = int(
+            (time.perf_counter() - started_at) * 1000
+        )
+
+        await self._user_repo.log_generation(
+            user=user,
+            gen_type=gen_type,
+            product_title=card.title,
+            cost=cost,
+            quality_score=quality,
+            duration_ms=duration_ms,
+        )
+
+        logger.info(
+            "generation_completed",
+            user_id=user.id,
+            generation_type=gen_type.value,
+            spent=cost,
+            balance=user.generation_balance,
+            duration_ms=duration_ms,
+            prompt_length=len(prompt),
+            quality=quality,
+        )
+        return card
+
+    async def _generate_card(
+        self,
+        user: User,
+        gen_type: GenerationType,
+        prompt: str,
+    ) -> tuple[ProductCard, int]:
+
+        last_raw = ""
+        last_reason = ""
+
+        for attempt in range(
+            1,
+            MAX_AI_ATTEMPTS + 1,
+        ):
+
+            raw = await self._call_ai(
+                user,
+                gen_type,
+                prompt,
+                attempt,
+                last_reason,
+            )
+
+            last_raw = raw
+
+            try:
+
+                card = _parse_card(raw)
+
+                _validate_card(card)
+
+                quality = _calculate_quality_score(
+                    card
+                )
+
+                logger.info(
+                    "generation_quality",
+                    user_id=user.id,
+                    generation_type=gen_type.value,
+                    quality=quality,
+                )
+
+                if (
+                    quality
+                    < QUALITY_SCORE_TO_ACCEPT
+                ):
+
+                    logger.warning(
+                        "generation_quality_retry",
+                        user_id=user.id,
+                        quality=quality,
+                    )
+
+                    if attempt < MAX_AI_ATTEMPTS:
+                        last_reason = (
+                            "Low quality score "
+                            f"({quality}/{QUALITY_SCORE_TO_ACCEPT})."
+                        )
+                        continue
+
+                return card, quality
+
+            except ProductValidationError as exc:
+
+                last_reason = str(exc)
+
+                logger.warning(
+                    "generation_validation_failed",
+                    user_id=user.id,
+                    generation_type=gen_type.value,
+                    reason=str(exc),
+                )
+
+                if attempt == MAX_AI_ATTEMPTS:
+
+                    logger.error(
+                        "generation_invalid_ai_response",
+                        user_id=user.id,
+                        generation_type=gen_type.value,
+                        preview=last_raw[:600],
+                    )
+
+                    raise
+
+                logger.warning(
+                    "generation_retry_invalid_json",
+                    user_id=user.id,
+                    generation_type=gen_type.value,
+                )
+
+        raise ProductValidationError(
+            "AI returned invalid response."
+        )
+
+    async def _call_ai(
+        self,
+        user: User,
+        gen_type: GenerationType,
+        prompt: str,
+        attempt: int,
+        reason: str = "",
+    ) -> str:
+        request_prompt = prompt
+        if attempt > 1:
+
+            reason_text = (
+                reason
+                or "недостаточное качество либо неверный JSON"
+            )
+
+            request_prompt = (
+                f"{prompt}\n\n"
+                "ПРЕДЫДУЩИЙ ОТВЕТ БЫЛ ОТКЛОНЕН.\n\n"
+                f"Причина: {reason_text}\n\n"
+                "Исправь ответ.\n\n"
+                "Строго соблюдай формат.\n\n"
+                "Ответ должен:\n"
+                "- начинаться с {\n"
+                "- заканчиваться }\n"
+                "- не содержать markdown\n"
+                "- не содержать комментариев\n"
+                "- не содержать пояснений\n"
+                "- не содержать ```\n"
+                "- не содержать текста вне JSON\n"
+            )
+        try:
+            raw = await self._client.generate(
+                request_prompt
+            )
+            raw = raw.strip()
+            logger.info(
+                "ai_response_length",
+                user_id=user.id,
+                generation_type=gen_type.value,
+                length=len(raw),
+            )
+            logger.debug(
+                "ai_preview",
+                preview=raw[:200],
+            )
+        except ProxyAPIError as exc:
+            logger.error(
+                "proxyapi_generation_failed",
+                user_id=user.id,
+                generation_type=gen_type.value,
+                prompt_length=len(request_prompt),
+                error=str(exc),
+            )
+            raise AIServiceError(
+                "AI temporarily unavailable."
+            ) from exc
+        if not raw:
+            logger.error(
+                "proxyapi_empty_response",
+                user_id=user.id,
+                generation_type=gen_type.value,
+            )
+            raise AIServiceError(
+                "AI returned empty response."
+            )
+        return raw
