@@ -5,9 +5,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.handlers.image_generation import begin_image_generation
 from src.handlers.improve_product import begin_improve_product
 from src.handlers.new_product import begin_new_product
+from src.handlers.product_analysis import begin_product_analysis
 from src.keyboards import tools_menu_keyboard
 
 router = Router(name="tools_menu")
@@ -67,8 +67,8 @@ async def tools_improve_product(
     await callback.answer()
 
 
-@router.callback_query(F.data == "tools:photo")
-async def tools_photo_generation(
+@router.callback_query(F.data == "tools:analysis")
+async def tools_product_analysis(
     callback: CallbackQuery,
     state: FSMContext,
     session: AsyncSession,
@@ -78,7 +78,7 @@ async def tools_photo_generation(
         await callback.answer()
         return
 
-    await begin_image_generation(
+    await begin_product_analysis(
         reply_target=callback.message,  # type: ignore[arg-type]
         telegram_id=callback.from_user.id,
         username=callback.from_user.username,
