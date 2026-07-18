@@ -6,6 +6,7 @@ from src.ai.proxyapi_client import (
 
 from src.ai.generation_service import (
     GenerationService,
+    ProductAnalysis,
     ProductCard,
 )
 
@@ -22,6 +23,7 @@ __all__ = [
     "proxyapi_client",
     "GenerationService",
     "ProductCard",
+    "ProductAnalysis",
     "AIServiceError",
     "GenerationError",
     "InsufficientBalanceError",
