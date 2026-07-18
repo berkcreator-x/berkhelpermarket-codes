@@ -222,3 +222,5 @@ class ProxyAPIClient:
 
         return content
 
+
+proxyapi_client = ProxyAPIClient()
