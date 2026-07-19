@@ -10,6 +10,24 @@ from aiogram.types import (
 from src.payments import GENERATION_PACKAGES
 
 
+def social_platform_keyboard() -> InlineKeyboardMarkup:
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Telegram",
+                    callback_data="social:telegram",
+                ),
+                InlineKeyboardButton(
+                    text="VK",
+                    callback_data="social:vk",
+                ),
+            ],
+        ]
+    )
+
+
 def improve_focus_keyboard() -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(
@@ -134,6 +152,12 @@ def tools_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="📊 Анализ товара",
                     callback_data="tools:analysis",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📢 Пост для соцсетей",
+                    callback_data="tools:social",
                 ),
             ],
         ]
