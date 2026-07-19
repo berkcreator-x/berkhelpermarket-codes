@@ -10,6 +10,38 @@ from aiogram.types import (
 from src.payments import GENERATION_PACKAGES
 
 
+def improve_focus_keyboard() -> InlineKeyboardMarkup:
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Полностью переписать (2 ген.)",
+                    callback_data="focus:all",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔍 Только SEO и ключи (1 ген.)",
+                    callback_data="focus:seo",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📝 Только описание (1 ген.)",
+                    callback_data="focus:description",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⭐ Только преимущества (1 ген.)",
+                    callback_data="focus:advantages",
+                ),
+            ],
+        ]
+    )
+
+
 def platform_select_keyboard() -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(
