@@ -12,6 +12,7 @@ class GenerationType(str, enum.Enum):
     NEW = "new"
     IMPROVE = "improve"
     ANALYSIS = "analysis"
+    SOCIAL_POST = "social_post"
     # IMAGES: фича удалена (нестабильное качество, высокая
     # себестоимость). Значение оставлено в enum ТОЛЬКО ради
     # совместимости со старыми записями в БД — новых
