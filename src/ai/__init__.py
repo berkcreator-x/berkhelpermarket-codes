@@ -8,6 +8,7 @@ from src.ai.generation_service import (
     GenerationService,
     ProductAnalysis,
     ProductCard,
+    SocialPost,
 )
 
 from src.exceptions import (
@@ -24,6 +25,7 @@ __all__ = [
     "GenerationService",
     "ProductCard",
     "ProductAnalysis",
+    "SocialPost",
     "AIServiceError",
     "GenerationError",
     "InsufficientBalanceError",
