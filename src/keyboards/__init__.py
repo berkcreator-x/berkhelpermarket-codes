@@ -3,6 +3,7 @@ from src.keyboards.keyboards import (
     admin_users_pagination_keyboard,
     cancel_keyboard,
     generation_packages_keyboard,
+    improve_focus_keyboard,
     main_menu_keyboard,
     payment_check_keyboard,
     platform_select_keyboard,
@@ -22,4 +23,5 @@ __all__ = [
     "tools_menu_keyboard",
     "platform_select_keyboard",
     "skip_price_keyboard",
+    "improve_focus_keyboard",
 ]
