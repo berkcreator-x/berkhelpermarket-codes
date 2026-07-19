@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.handlers.improve_product import begin_improve_product
 from src.handlers.new_product import begin_new_product
 from src.handlers.product_analysis import begin_product_analysis
+from src.handlers.social_post import begin_social_post
 from src.keyboards import tools_menu_keyboard
 
 router = Router(name="tools_menu")
@@ -79,6 +80,28 @@ async def tools_product_analysis(
         return
 
     await begin_product_analysis(
+        reply_target=callback.message,  # type: ignore[arg-type]
+        telegram_id=callback.from_user.id,
+        username=callback.from_user.username,
+        state=state,
+        session=session,
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "tools:social")
+async def tools_social_post(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+
+    if callback.message is None:
+        await callback.answer()
+        return
+
+    await begin_social_post(
         reply_target=callback.message,  # type: ignore[arg-type]
         telegram_id=callback.from_user.id,
         username=callback.from_user.username,
