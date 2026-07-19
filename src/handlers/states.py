@@ -25,3 +25,8 @@ class AdminGrantStates(StatesGroup):
 
 class ProductAnalysisStates(StatesGroup):
     waiting_for_text = State()
+
+
+class SocialPostStates(StatesGroup):
+    waiting_for_idea = State()
+    waiting_for_platform = State()
