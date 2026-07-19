@@ -9,6 +9,7 @@ from src.handlers import (
     new_product,
     product_analysis,
     profile,
+    social_post,
     tools_menu,
 )
 
@@ -21,6 +22,7 @@ def get_main_router() -> Router:
     router.include_router(new_product.router)
     router.include_router(improve_product.router)
     router.include_router(product_analysis.router)
+    router.include_router(social_post.router)
     router.include_router(profile.router)
     router.include_router(generations.router)
     router.include_router(history.router)
