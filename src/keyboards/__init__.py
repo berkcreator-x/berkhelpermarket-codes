@@ -9,6 +9,7 @@ from src.keyboards.keyboards import (
     platform_select_keyboard,
     profile_nav_keyboard,
     skip_price_keyboard,
+    social_platform_keyboard,
     tools_menu_keyboard,
 )
 
@@ -24,4 +25,5 @@ __all__ = [
     "platform_select_keyboard",
     "skip_price_keyboard",
     "improve_focus_keyboard",
+    "social_platform_keyboard",
 ]
