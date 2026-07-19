@@ -14,6 +14,8 @@ class NewProductStates(StatesGroup):
 
 class ImproveProductStates(StatesGroup):
     waiting_for_text = State()
+    waiting_for_platform = State()
+    waiting_for_focus = State()
 
 
 class AdminGrantStates(StatesGroup):
