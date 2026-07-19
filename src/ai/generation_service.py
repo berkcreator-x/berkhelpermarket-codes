@@ -544,16 +544,23 @@ class GenerationService:
         self,
         user: User,
         existing_text: str,
+        platform: str = "universal",
+        focus: str = "all",
     ) -> ProductCard:
 
         prompt = improve_product_prompt(
             existing_text,
+            platform,
+            focus,
         )
+
+        cost = 2 if focus == "all" else 1
 
         return await self._run(
             user,
             GenerationType.IMPROVE,
             prompt,
+            cost_override=cost,
         )
 
     async def analyze_product(
@@ -654,11 +661,16 @@ class GenerationService:
         user: User,
         gen_type: GenerationType,
         prompt: str,
+        cost_override: int | None = None,
     ) -> ProductCard:
 
         started_at = time.perf_counter()
 
-        cost = GENERATION_COSTS[gen_type]
+        cost = (
+            cost_override
+            if cost_override is not None
+            else GENERATION_COSTS[gen_type]
+        )
 
         if user.generation_balance < cost:
 
