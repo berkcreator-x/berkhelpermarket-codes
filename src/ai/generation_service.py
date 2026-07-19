@@ -16,6 +16,7 @@ from src.ai.prompt_builder import (
     analyze_product_prompt,
     improve_product_prompt,
     new_product_prompt,
+    social_post_prompt,
 )
 from src.exceptions import (
     AIServiceError,
@@ -37,6 +38,7 @@ GENERATION_COSTS: dict[GenerationType, int] = {
     GenerationType.NEW: 1,
     GenerationType.IMPROVE: 2,
     GenerationType.ANALYSIS: 1,
+    GenerationType.SOCIAL_POST: 2,
 }
 
 
@@ -154,6 +156,31 @@ class ProductAnalysis:
             parts.append(
                 f"👉 <b>Рекомендации</b>\n{recommendations}"
             )
+
+        return "\n\n".join(parts)
+
+
+# ==========================================================
+# SOCIAL POST
+# ==========================================================
+
+@dataclass(slots=True, frozen=True)
+class SocialPost:
+    text: str
+    hashtags: list[str] = field(default_factory=list)
+
+    def to_message(self) -> str:
+
+        parts = [self.text]
+
+        if self.hashtags:
+
+            tags = " ".join(
+                f"#{tag.lstrip('#')}"
+                for tag in self.hashtags
+            )
+
+            parts.append(tags)
 
         return "\n\n".join(parts)
 
@@ -499,6 +526,62 @@ def _parse_analysis(raw: str) -> ProductAnalysis:
     )
 
 
+def _parse_social_post(raw: str) -> SocialPost:
+
+    candidate = _extract_json(raw)
+
+    try:
+
+        payload = json.loads(candidate)
+
+    except Exception as exc:
+
+        logger.warning(
+            "ai_social_post_json_decode_failed",
+            preview=raw[:400],
+            error=str(exc),
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid JSON."
+        ) from exc
+
+    if not isinstance(payload, dict):
+
+        raise ProductValidationError(
+            "JSON root must be object."
+        )
+
+    payload = {
+        str(k).lower().strip(): v
+        for k, v in payload.items()
+    }
+
+    text = _normalize_string(
+        payload.get("text")
+    )
+
+    hashtags = _normalize_list(
+        payload.get("hashtags")
+    )
+
+    if not text:
+
+        logger.warning(
+            "ai_social_post_invalid_structure",
+            preview=raw[:300],
+        )
+
+        raise ProductValidationError(
+            "AI returned invalid response."
+        )
+
+    return SocialPost(
+        text=text,
+        hashtags=hashtags,
+    )
+
+
 # ==========================================================
 # SERVICE
 # ==========================================================
@@ -655,6 +738,99 @@ class GenerationService:
         )
 
         return analysis
+
+    async def generate_social_post(
+        self,
+        user: User,
+        idea: str,
+        platform: str = "telegram",
+    ) -> SocialPost:
+        """
+        Генерирует готовый пост для Telegram/VK по идее
+        или товару. Не создаёт карточку — отдельный,
+        более "человеческий" текстовый формат.
+        """
+
+        started_at = time.perf_counter()
+
+        cost = GENERATION_COSTS[GenerationType.SOCIAL_POST]
+
+        if user.generation_balance < cost:
+
+            logger.info(
+                "social_post_not_enough_balance",
+                user_id=user.id,
+                required=cost,
+                current=user.generation_balance,
+            )
+
+            raise InsufficientBalanceError(
+                f"Need {cost}, have {user.generation_balance}"
+            )
+
+        prompt = social_post_prompt(idea, platform)
+
+        last_reason = ""
+        post: SocialPost | None = None
+
+        for attempt in range(1, MAX_AI_ATTEMPTS + 1):
+
+            raw = await self._call_ai(
+                user,
+                GenerationType.SOCIAL_POST,
+                prompt,
+                attempt,
+                last_reason,
+            )
+
+            try:
+                post = _parse_social_post(raw)
+                break
+
+            except ProductValidationError as exc:
+
+                last_reason = str(exc)
+
+                logger.warning(
+                    "social_post_validation_failed",
+                    user_id=user.id,
+                    reason=str(exc),
+                )
+
+                if attempt == MAX_AI_ATTEMPTS:
+                    raise
+
+        if post is None:
+            raise ProductValidationError(
+                "AI returned invalid response."
+            )
+
+        await self._user_repo.deduct_generations_safe(
+            user=user,
+            amount=cost,
+        )
+
+        duration_ms = int(
+            (time.perf_counter() - started_at) * 1000
+        )
+
+        await self._user_repo.log_generation(
+            user=user,
+            gen_type=GenerationType.SOCIAL_POST,
+            cost=cost,
+            duration_ms=duration_ms,
+        )
+
+        logger.info(
+            "social_post_completed",
+            user_id=user.id,
+            spent=cost,
+            balance=user.generation_balance,
+            duration_ms=duration_ms,
+            platform=platform,
+        )
+
+        return post
 
     async def _run(
         self,
